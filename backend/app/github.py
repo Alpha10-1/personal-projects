@@ -265,3 +265,65 @@ def sync_repo(
         "linked_to_task": linked_to_task,
         "since": since.isoformat() if since else None,
     }
+
+
+# --- Diffs ------------------------------------------------------------------
+
+# A patch per commit, bounded twice: once so a single reformatting commit
+# can't swallow the whole budget, and once overall.
+DIFF_PER_COMMIT_CHARS = 4_000
+DIFF_TOTAL_CHARS = 24_000
+DIFF_MAX_COMMITS = 6
+
+
+def fetch_diffs(
+    repo: str,
+    shas: list[str],
+    *,
+    per_commit: int = DIFF_PER_COMMIT_CHARS,
+    total: int = DIFF_TOTAL_CHARS,
+) -> str:
+    """The patches for specific commits, as one block of text.
+
+    One request per commit, which is why the caller is expected to pass a
+    handful rather than a history. A commit that can't be read is skipped with
+    a marker instead of failing the batch: a review over five of six commits
+    is still worth having, and silently dropping one is not.
+    """
+    chunks: list[str] = []
+    used = 0
+    with httpx.Client(base_url=API_ROOT, headers=_headers(), timeout=TIMEOUT) as client:
+        for sha in shas[:DIFF_MAX_COMMITS]:
+            if used >= total:
+                chunks.append("... [diff budget reached; later commits omitted]")
+                break
+            try:
+                response = client.get(f"/repos/{repo}/commits/{sha}")
+                _raise_for_github(response, repo)
+                data = response.json()
+            except (httpx.HTTPError, RuntimeError, ValueError) as exc:
+                chunks.append(f"--- commit {sha[:8]}: diff unavailable ({exc})")
+                continue
+
+            subject = (data.get("commit", {}).get("message") or "").splitlines()
+            body = [f"=== commit {sha[:8]}: {subject[0] if subject else ''}"]
+            for changed in data.get("files") or []:
+                patch = changed.get("patch")
+                if not patch:
+                    # Binary files and very large ones come back without a
+                    # patch; naming them is still information.
+                    body.append(
+                        f"--- {changed.get('filename')} "
+                        f"({changed.get('status')}, no patch available)"
+                    )
+                    continue
+                body.append(f"--- {changed.get('filename')} ({changed.get('status')})")
+                body.append(patch)
+
+            text = "\n".join(body)
+            if len(text) > per_commit:
+                text = text[:per_commit] + "\n... [commit diff truncated]"
+            chunks.append(text)
+            used += len(text)
+
+    return "\n\n".join(chunks)

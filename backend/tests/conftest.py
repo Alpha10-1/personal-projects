@@ -120,6 +120,22 @@ def no_outbound_http(monkeypatch, request):
             "mark the test with @pytest.mark.network."
         )
 
-    from app import github
+    def refuse_diffs(repo, shas, **kw):
+        raise AssertionError(
+            f"Test tried to fetch diffs for {repo} from GitHub. Patch "
+            "github.fetch_diffs, or mark the test with @pytest.mark.network."
+        )
+
+    def refuse_model(*_args, **_kwargs):
+        raise AssertionError(
+            "Test tried to call the Anthropic API, which costs money. Patch "
+            "ai.structured or ai.stream instead."
+        )
+
+    from app import ai, github
 
     monkeypatch.setattr(github, "fetch_from_github", refuse)
+    monkeypatch.setattr(github, "fetch_diffs", refuse_diffs)
+    # The model is guarded at the client rather than at structured()/stream(),
+    # so a test that patches neither is caught instead of quietly billing.
+    monkeypatch.setattr(ai, "_client", refuse_model)

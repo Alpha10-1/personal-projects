@@ -1,9 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import { GitBranch } from "lucide-react";
+
 import { api } from "@/lib/api";
 import { PRIORITIES, PROJECT_CATEGORIES, PROJECT_STATUSES } from "@/lib/constants";
-import { Button, ErrorNote, Field, Modal, Select } from "@/components/ui";
+import AiSuggestions from "@/components/AiSuggestions";
+import { Badge, Button, ErrorNote, Field, Modal, Select } from "@/components/ui";
 
 const EMPTY = {
   name: "",
@@ -17,6 +20,7 @@ const EMPTY = {
   definition_of_done: "",
   stakeholder: "",
   tech_stack: "",
+  repo: "",
   progress_override: "",
   retro: "",
 };
@@ -33,9 +37,27 @@ export default function ProjectForm({ open, onClose, onSaved, project = null }) 
   const [showMore, setShowMore] = useState(false);
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
+  // Suggested tasks can't be created until the project has an id, so they
+  // wait here and are written immediately after it saves.
+  const [plannedTasks, setPlannedTasks] = useState([]);
 
   const set = (field) => (event) =>
     setForm((f) => ({ ...f, [field]: event.target.value }));
+
+  const applySuggestion = (field, value) => {
+    setForm((f) => ({ ...f, [field]: String(value) }));
+    // Extra detail is collapsed by default, so applying something in there
+    // would otherwise look like nothing happened.
+    if (["objective", "definition_of_done", "tech_stack"].includes(field)) {
+      setShowMore(true);
+    }
+  };
+
+  const planTasks = (_field, titles) =>
+    setPlannedTasks((existing) => [
+      ...existing,
+      ...titles.filter((title) => !existing.includes(title)),
+    ]);
 
   const submit = async (event) => {
     event.preventDefault();
@@ -55,6 +77,7 @@ export default function ProjectForm({ open, onClose, onSaved, project = null }) 
         definition_of_done: text(form.definition_of_done),
         stakeholder: text(form.stakeholder),
         tech_stack: text(form.tech_stack),
+        repo: text(form.repo),
         progress_override:
           form.progress_override === "" ? null : Number(form.progress_override),
         retro: text(form.retro),
@@ -62,6 +85,14 @@ export default function ProjectForm({ open, onClose, onSaved, project = null }) 
       const saved = project
         ? await api.patch(`/projects/${project.id}`, payload)
         : await api.post("/projects", payload);
+
+      // Sequential rather than parallel: if one fails, the ones before it are
+      // already saved and the error names the rest, instead of leaving an
+      // arbitrary subset written.
+      for (const title of plannedTasks) {
+        await api.post("/tasks", { title, project_id: saved.id });
+      }
+
       onSaved?.(saved);
       onClose();
     } catch (err) {
@@ -96,6 +127,41 @@ export default function ProjectForm({ open, onClose, onSaved, project = null }) 
           <textarea rows={2} value={form.summary} onChange={set("summary")} />
         </Field>
 
+        <AiSuggestions
+          kind="project"
+          draft={form}
+          onApply={applySuggestion}
+          onApplyList={planTasks}
+        />
+
+        {plannedTasks.length ? (
+          <div className="rounded-lg border bg-[var(--surface-2)]/60 p-3">
+            <p className="text-xs font-medium">
+              Tasks to create with this project
+              <span className="ml-1 text-[var(--text-muted)]">
+                ({plannedTasks.length})
+              </span>
+            </p>
+            <ul className="mt-1.5 space-y-1">
+              {plannedTasks.map((title) => (
+                <li key={title} className="flex items-center gap-2 text-xs">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setPlannedTasks((tasks) => tasks.filter((t) => t !== title))
+                    }
+                    className="text-[var(--text-muted)] hover:text-[var(--danger,#dc2626)]"
+                    aria-label={`Don't create ${title}`}
+                  >
+                    ×
+                  </button>
+                  <span>{title}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
         <div className="grid gap-3 sm:grid-cols-3">
           <Field label="Status">
             <Select value={form.status} onChange={set("status")} options={PROJECT_STATUSES} />
@@ -120,6 +186,25 @@ export default function ProjectForm({ open, onClose, onSaved, project = null }) 
             <input type="date" value={form.target_date} onChange={set("target_date")} />
           </Field>
         </div>
+
+        <Field
+          label={
+            <span className="inline-flex items-center gap-1.5">
+              <GitBranch size={13} /> GitHub repo
+              <Badge tone="neutral">optional</Badge>
+            </span>
+          }
+          hint="Linking one pulls in commits and pull requests, and lets the analyst review them. Leave blank to keep this project off GitHub entirely."
+        >
+          <input
+            type="text"
+            value={form.repo}
+            onChange={set("repo")}
+            placeholder="owner/name"
+            pattern="^$|^[\w.-]+/[\w.-]+$"
+            title="Use owner/name, for example Alpha10-1/personal-projects"
+          />
+        </Field>
 
         <button
           type="button"

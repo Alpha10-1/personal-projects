@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+
+import Assistant from "@/components/Assistant";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
@@ -152,6 +154,10 @@ export default function Shell({ children }) {
           <div className="mx-auto w-full max-w-6xl">{children}</div>
         </main>
       </div>
+
+      {/* Mounted in the shell rather than per page so the conversation
+          survives navigating between them. */}
+      <Assistant />
     </div>
   );
 }

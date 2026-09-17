@@ -180,6 +180,58 @@ recorded as a failure and nothing else happens.
 
 ---
 
+## The assistant
+
+Off by default. It turns on when `ANTHROPIC_API_KEY` is set in `backend/.env`
+(copy `backend/.env.example`), and `GET /ai/status` is how the UI decides
+whether to offer any of it. With no key the routes answer 503 with that
+reason and the buttons are not rendered at all — a disabled feature should be
+invisible, not broken.
+
+**This is the only part of the system that sends your data anywhere.** What
+goes out is built in `assistant.py` from explicit queries, so it can be read
+rather than inferred from a prompt string, and everything is length-capped
+with truncation marked so the model can tell it was cut off.
+
+| Where | What it does |
+|---|---|
+| New project / new task | Suggests summary, objective, done criteria, priority and first tasks **as you type** |
+| Floating chat, every page | Answers questions about your projects, tasks, notes and GitHub activity |
+| Project → Repo tab | Summary, possible bugs and improvements over recent commits |
+
+**Nothing is applied on its own.** Every suggestion is a button, and the chat
+can read the tracker but cannot write to it. That is the same line
+`review.py` draws: the moment generated content can quietly become record,
+none of the numbers mean anything — and you stop being able to tell which
+words were yours.
+
+Two models, because the jobs differ. Suggestions go to Haiku, which is fast
+enough to feel live; chat and repo review go to Sonnet, where the answer
+matters more than a second of latency. Override with `PP_AI_FAST_MODEL` and
+`PP_AI_MODEL`.
+
+### What it costs
+
+Suggestions fire on a pause in typing, not a keystroke: 900ms of quiet, and
+only once a draft has something in it. A request supersedes the one before
+it, so a long sentence is one call rather than forty. The repo review reads
+diffs and is the expensive one, which is why it is a button rather than
+something that happens when you open the tab.
+
+```bash
+curl localhost:8000/ai/status
+curl -X POST localhost:8000/ai/suggest/project   -H 'Content-Type: application/json'   -d '{"draft": {"name": "Shift-scheduling forecast model"}}'
+curl -X POST localhost:8000/ai/projects/1/repo-review
+```
+
+### Linking a repo
+
+A project's **GitHub repo** field is on the project form and is optional —
+leave it blank and that project stays off GitHub entirely. Filling it in is
+what turns on activity ingestion, the two suggestion rules, and the Repo tab.
+
+---
+
 ## Using it from Claude (MCP)
 
 `backend/mcp_server.py` exposes the tracker as an MCP server, so Claude Code
@@ -255,9 +307,13 @@ Everything is in `backend/data/`:
 - `personal.db` — the SQLite database
 - `uploads/` — uploaded files, stored under generated names
 
-Both are gitignored. **Backing up means copying that one folder.** Nothing
-leaves your machine: the API binds to localhost and the frontend talks straight
-to it.
+Both are gitignored. **Backing up means copying that one folder.**
+
+The API binds to localhost and the frontend talks straight to it, so nothing
+leaves your machine — **with one exception, and only if you switch it on.**
+The assistant below sends project text, commit messages and code diffs to
+Anthropic. Without `ANTHROPIC_API_KEY` set, none of it runs and the guarantee
+above holds exactly as it reads.
 
 ---
 
@@ -297,7 +353,11 @@ backend/
     models.py      the whole data model
     schemas.py     request/response shapes
     enrich.py      derived counts, hours and progress
-    routes/        projects, milestones, tasks, time_logs, library, dashboard
+    github.py      fetching, translating and linking activity
+    review.py      the deterministic rules: findings and suggestions
+    ai.py          the model client -- the only thing that leaves the machine
+    assistant.py   what the model is told, and what it is asked for
+    routes/        projects, milestones, tasks, time_logs, library, dashboard, ai
   seed.py          sample data (refuses to run if projects already exist)
 src/
   app/             Next.js App Router pages

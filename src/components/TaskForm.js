@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { api } from "@/lib/api";
 import { PRIORITIES, TASK_STATUSES } from "@/lib/constants";
+import AiSuggestions from "@/components/AiSuggestions";
 import { Button, ErrorNote, Field, Modal, Select } from "@/components/ui";
 
 const EMPTY = {
@@ -49,9 +50,20 @@ export default function TaskForm({
   const [form, setForm] = useState(() => ({ ...toForm(task), ...defaults }));
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
+  // Subtasks need a parent id, so they wait until the task itself is saved.
+  const [plannedSubtasks, setPlannedSubtasks] = useState([]);
 
   const set = (field) => (event) =>
     setForm((f) => ({ ...f, [field]: event.target.value }));
+
+  const applySuggestion = (field, value) =>
+    setForm((f) => ({ ...f, [field]: String(value) }));
+
+  const planSubtasks = (_field, titles) =>
+    setPlannedSubtasks((existing) => [
+      ...existing,
+      ...titles.filter((title) => !existing.includes(title)),
+    ]);
 
   const submit = async (event) => {
     event.preventDefault();
@@ -74,6 +86,15 @@ export default function TaskForm({
       const saved = task
         ? await api.patch(`/tasks/${task.id}`, payload)
         : await api.post("/tasks", payload);
+
+      for (const title of plannedSubtasks) {
+        await api.post("/tasks", {
+          title,
+          parent_task_id: saved.id,
+          project_id: saved.project_id,
+        });
+      }
+
       onSaved?.(saved);
       onClose();
     } catch (err) {
@@ -104,6 +125,42 @@ export default function TaskForm({
             placeholder="e.g. Baseline the retrieval eval set"
           />
         </Field>
+
+        <AiSuggestions
+          kind="task"
+          draft={form}
+          projectId={form.project_id === "" ? null : Number(form.project_id)}
+          onApply={applySuggestion}
+          onApplyList={planSubtasks}
+        />
+
+        {plannedSubtasks.length ? (
+          <div className="rounded-lg border bg-[var(--surface-2)]/60 p-3">
+            <p className="text-xs font-medium">
+              Subtasks to create
+              <span className="ml-1 text-[var(--text-muted)]">
+                ({plannedSubtasks.length})
+              </span>
+            </p>
+            <ul className="mt-1.5 space-y-1">
+              {plannedSubtasks.map((title) => (
+                <li key={title} className="flex items-center gap-2 text-xs">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setPlannedSubtasks((tasks) => tasks.filter((t) => t !== title))
+                    }
+                    className="text-[var(--text-muted)]"
+                    aria-label={`Don't create ${title}`}
+                  >
+                    ×
+                  </button>
+                  <span>{title}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
 
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Project">

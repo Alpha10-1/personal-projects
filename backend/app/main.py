@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.db import DB_PATH, init_db
 from app.routes import (
     activity,
+    ai,
     dashboard,
     library,
     milestones,
@@ -60,3 +61,4 @@ app.include_router(library.router)
 app.include_router(dashboard.router)
 app.include_router(activity.router)
 app.include_router(review.router)
+app.include_router(ai.router)
