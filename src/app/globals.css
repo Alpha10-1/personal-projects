@@ -1,0 +1,145 @@
+@import "tailwindcss";
+
+/* Design tokens. Light is the default; the dark values are a selected set
+   stepped for the dark surface, not an automatic inversion. */
+:root {
+  color-scheme: light;
+
+  --surface-0: #f6f5f2;
+  --surface-1: #fcfcfb;
+  --surface-2: #f0efec;
+  --border: #dedcd6;
+  --border-strong: #c7c4bb;
+
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #86847d;
+
+  --accent: #2a78d6;
+  --accent-soft: #e8f0fd;
+
+  --good: #0ca30c;
+  --warning: #fab219;
+  --serious: #ec835a;
+  --critical: #d03b3b;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --surface-0: #121211;
+    --surface-1: #1a1a19;
+    --surface-2: #232321;
+    --border: #35342f;
+    --border-strong: #4a4943;
+
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #8f8e85;
+
+    --accent: #3987e5;
+    --accent-soft: #17273c;
+
+    --good: #0ca30c;
+    --warning: #fab219;
+    --serious: #ec835a;
+    --critical: #d03b3b;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --surface-0: #121211;
+  --surface-1: #1a1a19;
+  --surface-2: #232321;
+  --border: #35342f;
+  --border-strong: #4a4943;
+
+  --text-primary: #ffffff;
+  --text-secondary: #c3c2b7;
+  --text-muted: #8f8e85;
+
+  --accent: #3987e5;
+  --accent-soft: #17273c;
+}
+
+@theme inline {
+  --color-surface-0: var(--surface-0);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-line: var(--border);
+  --color-line-strong: var(--border-strong);
+  --color-ink: var(--text-primary);
+  --color-ink-2: var(--text-secondary);
+  --color-ink-3: var(--text-muted);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-good: var(--good);
+  --color-warning: var(--warning);
+  --color-serious: var(--serious);
+  --color-critical: var(--critical);
+}
+
+* {
+  border-color: var(--border);
+}
+
+html,
+body {
+  background: var(--surface-0);
+  color: var(--text-primary);
+}
+
+body {
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Inputs inherit the theme rather than the browser default, so a dark
+   surface never gets a white form control pasted onto it. */
+input,
+textarea,
+select,
+button {
+  font: inherit;
+  color: inherit;
+}
+
+input[type="date"],
+input[type="number"],
+input[type="text"],
+input[type="url"],
+textarea,
+select {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.625rem;
+  width: 100%;
+  outline: none;
+}
+
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 22%, transparent);
+}
+
+::placeholder {
+  color: var(--text-muted);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
