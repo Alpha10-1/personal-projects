@@ -112,8 +112,9 @@ has to declare itself and anything that doesn't — the web UI, curl, a script
 
 ## The review: findings and suggestions
 
-`GET /review` is the analyst's reading of the board. Two kinds of output, kept
-apart on purpose:
+The **Review** page in the app shows both, with accept and dismiss buttons.
+`GET /review` is the same thing over HTTP. Two kinds of output, kept apart
+on purpose:
 
 - **Findings** — observations, computed fresh, never stored. Stale work in
   progress, long-standing blockers, overdue tasks, estimate overruns,
@@ -144,6 +145,38 @@ Accepting applies the change through the same transition as an edit made by
 hand, so `completed_at` and the cycle-time figures stay consistent.
 Dismissing is permanent: the dismissed row keeps its fingerprint, which is
 what stops the rule proposing the same thing again.
+
+---
+
+## Running it unattended
+
+`backend/analyst_run.py` is the loop without a conversation: pull activity,
+then propose. It does only the deterministic half — the narrative stays with
+the agent, which needs a conversation rather than a cron entry.
+
+```bash
+cd backend
+python analyst_run.py              # sync + propose
+python analyst_run.py --dry-run    # report only, change nothing
+python analyst_run.py --note       # also write the digest into the tracker
+python analyst_run.py --quiet      # print only on failure (what the task runs)
+```
+
+It talks to the HTTP API, stamps its writes as `agent`, exits 1 if the
+backend isn't running, and appends every run to
+`backend/data/analyst-runs.jsonl`.
+
+A Windows scheduled task **`PersonalProjects-AnalystRun`** runs it daily at
+07:30:
+
+```powershell
+Get-ScheduledTaskInfo -TaskName PersonalProjects-AnalystRun
+Start-ScheduledTask   -TaskName PersonalProjects-AnalystRun   # run it now
+Unregister-ScheduledTask -TaskName PersonalProjects-AnalystRun -Confirm:$false
+```
+
+It needs the backend running to do anything; when it isn't, the run is
+recorded as a failure and nothing else happens.
 
 ---
 

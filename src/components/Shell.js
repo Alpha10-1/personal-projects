@@ -12,6 +12,7 @@ import {
   Moon,
   Sun,
   Timer,
+  Stethoscope,
   Sunrise,
   X,
 } from "lucide-react";
@@ -23,6 +24,7 @@ const NAV = [
   { href: "/time", label: "Time", icon: Timer },
   { href: "/library", label: "Library", icon: BookMarked },
   { href: "/insights", label: "Insights", icon: BarChart3 },
+  { href: "/review", label: "Review", icon: Stethoscope },
 ];
 
 function isActive(pathname, href) {
