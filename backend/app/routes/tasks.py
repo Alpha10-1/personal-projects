@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app import models, schemas
 from app.db import get_db
+from app.deps import client_source
 from app.enrich import enrich_tasks, serialize
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
@@ -98,9 +99,13 @@ def list_tasks(
 
 
 @router.post("", response_model=schemas.TaskOut, status_code=201)
-def create_task(payload: schemas.TaskCreate, db: Session = Depends(get_db)):
+def create_task(
+    payload: schemas.TaskCreate,
+    db: Session = Depends(get_db),
+    source: str = Depends(client_source),
+):
     _validate_refs(db, payload.project_id, payload.milestone_id, payload.parent_task_id)
-    task = models.Task(**payload.model_dump())
+    task = models.Task(**payload.model_dump(), source=source)
     if task.status == "done":
         task.completed_at = models.utcnow()
     db.add(task)

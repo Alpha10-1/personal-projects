@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app import models, schemas
 from app.db import UPLOAD_DIR, get_db
+from app.deps import client_source
 from app.enrich import project_name_map
 
 router = APIRouter(tags=["library"])
@@ -70,9 +71,13 @@ def list_notes(
 
 
 @notes_router.post("", response_model=schemas.NoteOut, status_code=201)
-def create_note(payload: schemas.NoteCreate, db: Session = Depends(get_db)):
+def create_note(
+    payload: schemas.NoteCreate,
+    db: Session = Depends(get_db),
+    source: str = Depends(client_source),
+):
     _check_project(db, payload.project_id)
-    note = models.Note(**payload.model_dump())
+    note = models.Note(**payload.model_dump(), source=source)
     db.add(note)
     db.commit()
     db.refresh(note)

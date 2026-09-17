@@ -12,7 +12,15 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.db import DB_PATH, init_db
-from app.routes import dashboard, library, milestones, projects, tasks, time_logs
+from app.routes import (
+    activity,
+    dashboard,
+    library,
+    milestones,
+    projects,
+    tasks,
+    time_logs,
+)
 
 
 @asynccontextmanager
@@ -49,3 +57,4 @@ app.include_router(tasks.router)
 app.include_router(time_logs.router)
 app.include_router(library.router)
 app.include_router(dashboard.router)
+app.include_router(activity.router)

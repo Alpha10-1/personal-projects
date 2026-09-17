@@ -61,6 +61,7 @@ class ProjectCreate(BaseModel):
     definition_of_done: Optional[str] = None
     stakeholder: Optional[str] = None
     tech_stack: Optional[str] = None
+    repo: Optional[str] = Field(default=None, max_length=255)
     progress_override: Optional[int] = Field(default=None, ge=0, le=100)
     retro: Optional[str] = None
 
@@ -79,6 +80,7 @@ class ProjectUpdate(BaseModel):
     definition_of_done: Optional[str] = None
     stakeholder: Optional[str] = None
     tech_stack: Optional[str] = None
+    repo: Optional[str] = Field(default=None, max_length=255)
     progress_override: Optional[int] = Field(default=None, ge=0, le=100)
     retro: Optional[str] = None
 
@@ -97,6 +99,7 @@ class ProjectOut(ORMModel):
     definition_of_done: Optional[str]
     stakeholder: Optional[str]
     tech_stack: Optional[str]
+    repo: Optional[str]
     progress_override: Optional[int]
     retro: Optional[str]
     created_at: Optional[datetime]
@@ -192,6 +195,7 @@ class TaskOut(ORMModel):
     blocked_reason: Optional[str]
     completed_at: Optional[datetime]
     created_at: Optional[datetime]
+    source: str = "human"
     project_name: Optional[str] = None
     hours_logged: float = 0.0
     subtask_total: int = 0
@@ -227,6 +231,7 @@ class TimeLogOut(ORMModel):
     category: str
     note: Optional[str]
     created_at: Optional[datetime]
+    source: str = "human"
     project_name: Optional[str] = None
     task_title: Optional[str] = None
 
@@ -258,6 +263,7 @@ class NoteOut(ORMModel):
     pinned: bool
     created_at: Optional[datetime]
     updated_at: Optional[datetime]
+    source: str = "human"
     project_name: Optional[str] = None
 
 
@@ -288,6 +294,36 @@ class LinkOut(ORMModel):
     note: Optional[str]
     created_at: Optional[datetime]
     project_name: Optional[str] = None
+
+
+ActivityKind = Literal["commit", "pull_request", "issue"]
+
+
+class ActivityEventOut(ORMModel):
+    id: int
+    provider: str
+    external_id: str
+    kind: str
+    repo: Optional[str]
+    actor: Optional[str]
+    title: str
+    url: Optional[str]
+    occurred_at: datetime
+    project_id: Optional[int]
+    task_id: Optional[int]
+    # repo | convention | manual -- how the link was arrived at.
+    linked_by: Optional[str]
+    project_name: Optional[str] = None
+    task_title: Optional[str] = None
+
+
+class SyncResult(BaseModel):
+    repo: str
+    fetched: int
+    added: int
+    skipped: int
+    linked_to_task: int
+    since: Optional[str] = None
 
 
 class AttachmentOut(ORMModel):

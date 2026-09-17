@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app import models, schemas
 from app.db import get_db
+from app.deps import client_source
 from app.enrich import project_name_map
 
 router = APIRouter(prefix="/time-logs", tags=["time"])
@@ -84,9 +85,13 @@ def list_time_logs(
 
 
 @router.post("", response_model=schemas.TimeLogOut, status_code=201)
-def create_time_log(payload: schemas.TimeLogCreate, db: Session = Depends(get_db)):
+def create_time_log(
+    payload: schemas.TimeLogCreate,
+    db: Session = Depends(get_db),
+    source: str = Depends(client_source),
+):
     data = _resolve_project(db, payload.model_dump())
-    log = models.TimeLog(**data)
+    log = models.TimeLog(**data, source=source)
     db.add(log)
     db.commit()
     db.refresh(log)

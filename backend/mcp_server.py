@@ -34,6 +34,10 @@ AUDIT_LOG = DATA_DIR / "agent-audit.jsonl"
 
 TIMEOUT = httpx.Timeout(20.0)
 
+# Every write through this server is stamped as agent-written, so what an
+# agent produced is never indistinguishable from what the user typed.
+HEADERS = {"X-PP-Source": "agent"}
+
 # read_only_hint lets a client show which tools only look and which change
 # things, so "summarise my week" and "close these tasks" are not equivalent.
 READS = ToolAnnotations(read_only_hint=True, open_world_hint=False)
@@ -116,7 +120,9 @@ async def _call(
 ) -> Any:
     mutating = method != "GET"
     try:
-        async with httpx.AsyncClient(base_url=API_URL, timeout=TIMEOUT) as client:
+        async with httpx.AsyncClient(
+            base_url=API_URL, timeout=TIMEOUT, headers=HEADERS
+        ) as client:
             response = await client.request(
                 method, path, params=_prune(params or {}), json=body
             )
@@ -452,6 +458,52 @@ async def update_project(
     if not body:
         raise ToolError("Nothing to update: pass at least one field to change.")
     return await _call("PATCH", f"/projects/{project_id}", body=body)
+
+
+@server.tool(
+    description=(
+        "Recorded activity from other systems -- GitHub commits and pull "
+        "requests. These are facts about what happened, already linked to a "
+        "project where the repo is known. `unlinked_only` returns the ones "
+        "that matched no project, which is the review queue."
+    ),
+    annotations=READS,
+)
+async def list_activity(
+    project_id: Optional[int] = None,
+    task_id: Optional[int] = None,
+    repo: Optional[str] = None,
+    kind: Optional[str] = None,
+    unlinked_only: bool = False,
+    last_days: Optional[int] = None,
+) -> list:
+    return await _call(
+        "GET",
+        "/activity",
+        params={
+            "project_id": project_id,
+            "task_id": task_id,
+            "repo": repo,
+            "kind": kind,
+            "unlinked_only": unlinked_only,
+            "last_days": last_days,
+        },
+    )
+
+
+@server.tool(
+    description=(
+        "Pull new activity from GitHub for the tracked repos, or one named "
+        "repo. Safe to run repeatedly -- events are keyed by GitHub's own id, "
+        "so a second run adds nothing. A project is tracked once its `repo` "
+        "field is set to \"owner/name\"."
+    ),
+    annotations=WRITES,
+)
+async def sync_activity(repo: Optional[str] = None, limit: int = 100) -> list:
+    return await _call(
+        "POST", "/activity/sync", params={"repo": repo, "limit": limit}
+    )
 
 
 if __name__ == "__main__":

@@ -98,3 +98,28 @@ class Factory:
 @pytest.fixture
 def make(db):
     return Factory(db)
+
+
+@pytest.fixture(autouse=True)
+def no_outbound_http(monkeypatch, request):
+    """Fail loudly if a test reaches the real GitHub API.
+
+    An earlier version of sync_repo bound its fetcher as a default argument,
+    so patching the module attribute silently did nothing and the suite went
+    to the network for real. This makes that failure mode impossible to miss
+    rather than merely slow.
+
+    Marking a test `network` opts back in.
+    """
+    if request.node.get_closest_marker("network"):
+        return
+
+    def refuse(repo, since, limit):
+        raise AssertionError(
+            f"Test tried to fetch {repo} from GitHub. Inject a fetcher, or "
+            "mark the test with @pytest.mark.network."
+        )
+
+    from app import github
+
+    monkeypatch.setattr(github, "fetch_from_github", refuse)

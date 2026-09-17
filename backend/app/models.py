@@ -27,6 +27,16 @@ def utcnow():
     return datetime.now(UTC).replace(tzinfo=None)
 
 
+# Who put a row here: the person using the app, or an agent acting for them.
+# Recorded so generated content is never indistinguishable from what was
+# entered by hand -- the moment those blur, none of the numbers mean anything.
+SOURCES = ("human", "agent")
+
+
+def source_column():
+    return Column(String(10), nullable=False, default="human", index=True)
+
+
 class Project(Base):
     """A body of work with an outcome -- a model to ship, an analysis to
     deliver, a capability to learn."""
@@ -56,6 +66,9 @@ class Project(Base):
     # there is no user table to point at.
     stakeholder = Column(String(255), nullable=True)
     tech_stack = Column(String(255), nullable=True)
+    # "owner/name" on GitHub. Activity in this repo is attributed to this
+    # project, which is the cheapest linkage that is actually reliable.
+    repo = Column(String(255), nullable=True, index=True)
 
     # Manually set 0-100. Kept alongside the task-derived percentage rather
     # than replacing it, because early-stage work often has real progress and
@@ -111,6 +124,7 @@ class Task(Base):
     completed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+    source = source_column()
 
 
 class TimeLog(Base):
@@ -129,6 +143,7 @@ class TimeLog(Base):
     note = Column(Text, nullable=True)
 
     created_at = Column(DateTime, default=utcnow)
+    source = source_column()
 
 
 class Note(Base):
@@ -147,6 +162,7 @@ class Note(Base):
 
     created_at = Column(DateTime, default=utcnow, index=True)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+    source = source_column()
 
 
 class Link(Base):
@@ -162,6 +178,49 @@ class Link(Base):
     # paper | repo | doc | dataset | tool | other
     kind = Column(String(20), nullable=False, default="other", index=True)
     note = Column(Text, nullable=True)
+
+    created_at = Column(DateTime, default=utcnow)
+
+
+class ActivityEvent(Base):
+    """Something that happened in another system: a commit, a PR, an issue.
+
+    This table records facts and nothing else. It does not decide what a
+    commit means for a project's progress -- that inference belongs further
+    up, where it can be reviewed and corrected. Keeping the two apart is what
+    makes it safe to re-derive the interpretation later without re-fetching
+    the history.
+
+    `external_id` is the provider's own identifier and is unique, so a sync
+    that runs twice records each event once.
+    """
+
+    __tablename__ = "activity_events"
+
+    id = Column(Integer, primary_key=True)
+
+    # github (more later). Not called "source": that word is already taken by
+    # the human/agent provenance flag on the other tables.
+    provider = Column(String(20), nullable=False, default="github", index=True)
+    external_id = Column(String(255), nullable=False, unique=True)
+    # commit | pull_request | issue
+    kind = Column(String(20), nullable=False, index=True)
+
+    repo = Column(String(255), nullable=True, index=True)
+    actor = Column(String(255), nullable=True)
+    title = Column(Text, nullable=False)
+    url = Column(Text, nullable=True)
+    occurred_at = Column(DateTime, nullable=False, index=True)
+
+    # The provider's payload, kept verbatim so a later linkage rule can look
+    # at fields this schema never thought to store.
+    raw = Column(Text, nullable=True)
+
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    task_id = Column(Integer, ForeignKey("tasks.id"), nullable=True, index=True)
+    # repo | convention | manual -- how the link above was arrived at, so a
+    # guess is never mistaken for something the user stated.
+    linked_by = Column(String(20), nullable=True)
 
     created_at = Column(DateTime, default=utcnow)
 

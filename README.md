@@ -63,6 +63,53 @@ After the first run, starting up again is just `.\.venv\Scripts\Activate.ps1` +
 
 ---
 
+## Activity from GitHub
+
+Commits and pull requests are pulled in and recorded as **facts** — what
+happened, when, by whom. Nothing in the ingestion layer decides what that
+means for a project's progress; that inference belongs somewhere it can be
+reviewed, and keeping it out means the facts can be re-interpreted later
+without re-fetching them.
+
+Point a project at a repo, then sync:
+
+```bash
+curl -X PATCH localhost:8000/projects/1 \
+  -H 'Content-Type: application/json' \
+  -d '{"repo": "owner/name"}'
+
+curl -X POST localhost:8000/activity/sync
+curl localhost:8000/activity
+```
+
+`GET /activity/repos` lists what will be synced. Syncing is idempotent —
+events are keyed by GitHub's own id, and each run asks only for what happened
+after the newest event already stored, so running it twice adds nothing.
+
+Private repos need `GITHUB_TOKEN` in the environment.
+
+**How an event gets linked**, in order of how much it can be trusted:
+
+| `linked_by` | Meaning |
+|---|---|
+| `convention` | The message said `Task: 42` explicitly, and task 42 is in this repo's project. |
+| `repo` | The repo maps to a project; no task was named. |
+| *null* | No project maps to this repo. `GET /activity?unlinked_only=true` is the review queue. |
+
+A task reference pointing at *another* project's task is ignored rather than
+followed — far more likely a typo than a real cross-project link. `#42` is
+deliberately not treated as a task reference: on GitHub that already means an
+issue.
+
+### Who wrote a row
+
+`tasks`, `time_logs` and `notes` carry a `source` of `human` or `agent`.
+It is taken from the `X-PP-Source` header, not the request body, so an agent
+has to declare itself and anything that doesn't — the web UI, curl, a script
+— counts as human. The MCP server sets it on every request.
+
+---
+
 ## Using it from Claude (MCP)
 
 `backend/mcp_server.py` exposes the tracker as an MCP server, so Claude Code
@@ -87,9 +134,9 @@ cd backend
 PP_API_URL=http://localhost:8000 python mcp_server.py
 ```
 
-Twelve tools: seven read-only (`today`, `insights`, `list_projects`,
-`list_tasks`, `list_milestones`, `list_time_logs`, `list_notes`) and five that
-write (`create_task`, `update_task`, `log_time`, `add_note`,
+Fourteen tools: nine read-only (`today`, `insights`, `list_projects`,
+`list_tasks`, `list_milestones`, `list_time_logs`, `list_notes`, `list_activity`) and five that
+write (`create_task`, `update_task`, `log_time`, `add_note`, `sync_activity`,
 `update_project`). They're annotated with MCP's `read_only_hint` so a client
 can tell the difference before calling.
 
