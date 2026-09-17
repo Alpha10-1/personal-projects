@@ -55,5 +55,18 @@ jobs:
       - name: Lint
         run: ruff check .
 
+      # pipefail so the step still fails on a red suite despite the tee.
       - name: Test
-        run: pytest
+        run: |
+          set -o pipefail
+          pytest --tb=short -q 2>&1 | tee "$RUNNER_TEMP/pytest.txt"
+
+      # Annotations show up on the run page itself, so a red build can be read
+      # without downloading the log archive.
+      - name: Surface the failures
+        if: failure()
+        run: |
+          grep -E '^(FAILED|ERROR) ' "$RUNNER_TEMP/pytest.txt" | head -40 |
+            while IFS= read -r line; do echo "::error::$line"; done
+          tail -n 3 "$RUNNER_TEMP/pytest.txt" |
+            while IFS= read -r line; do echo "::error::$line"; done
