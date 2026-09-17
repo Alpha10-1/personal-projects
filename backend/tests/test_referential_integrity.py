@@ -9,6 +9,8 @@ that no longer exists -- which is what these tests pin down.
 from conftest import TODAY
 from sqlalchemy import text
 
+from app import models
+
 
 def test_foreign_keys_are_enforced_on_the_connection(db):
     assert db.execute(text("PRAGMA foreign_keys")).scalar() == 1
@@ -150,4 +152,51 @@ def test_deleting_a_milestone_leaves_its_tasks_on_the_project(client, db):
     survivor = client.get(f"/tasks/{task['id']}").json()
     assert survivor["milestone_id"] is None
     assert survivor["project_id"] == project["id"]
+    assert no_dangling_rows(db) == []
+
+
+# --- Activity events ----------------------------------------------------------
+
+
+def _add_activity(db, project, task=None, external_id="github:commit:x"):
+    db.add(
+        models.ActivityEvent(
+            provider="github",
+            external_id=external_id,
+            kind="commit",
+            repo="owner/name",
+            title="some commit",
+            occurred_at=models.utcnow(),
+            project_id=project.id,
+            task_id=task.id if task else None,
+            linked_by="convention" if task else "repo",
+        )
+    )
+    db.commit()
+
+
+def test_deleting_a_task_keeps_its_activity_and_clears_the_link(client, db, make):
+    """Activity is a record of something that happened elsewhere, so it
+    outlives the task it was attributed to."""
+    project = make.project(name="Tracker", repo="owner/name")
+    task = make.task(title="Tidy", project_id=project.id)
+    _add_activity(db, project, task)
+
+    assert client.delete(f"/tasks/{task.id}").status_code == 204
+
+    events = client.get("/activity").json()
+    assert len(events) == 1
+    assert events[0]["task_id"] is None
+    assert events[0]["project_id"] == project.id
+    assert no_dangling_rows(db) == []
+
+
+def test_deleting_a_project_takes_its_activity_with_it(client, db, make):
+    project = make.project(name="Tracker", repo="owner/name")
+    task = make.task(title="Tidy", project_id=project.id)
+    _add_activity(db, project, task)
+
+    assert client.delete(f"/projects/{project.id}").status_code == 204
+
+    assert client.get("/activity").json() == []
     assert no_dangling_rows(db) == []

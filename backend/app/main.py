@@ -18,6 +18,7 @@ from app.routes import (
     library,
     milestones,
     projects,
+    review,
     tasks,
     time_logs,
 )
@@ -58,3 +59,4 @@ app.include_router(time_logs.router)
 app.include_router(library.router)
 app.include_router(dashboard.router)
 app.include_router(activity.router)
+app.include_router(review.router)

@@ -18,6 +18,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 
 from app.db import Base
@@ -223,6 +224,48 @@ class ActivityEvent(Base):
     linked_by = Column(String(20), nullable=True)
 
     created_at = Column(DateTime, default=utcnow)
+
+
+class Suggestion(Base):
+    """A change the analyst thinks should happen, waiting on a decision.
+
+    Suggestions are never applied on their own. The agent can see the same
+    evidence you can and is often right, but "often right" applied silently
+    to the numbers you steer by is worse than nothing -- so the row sits here
+    with its reasoning until it is accepted or dismissed.
+
+    `fingerprint` is unique, which does double duty: refreshing does not
+    produce duplicates, and a suggestion you dismissed is never raised again,
+    because the dismissed row still occupies its fingerprint.
+    """
+
+    __tablename__ = "suggestions"
+
+    id = Column(Integer, primary_key=True)
+
+    # Which rule produced this, so a noisy one can be found and turned off.
+    rule = Column(String(40), nullable=False, index=True)
+    fingerprint = Column(String(300), nullable=False, unique=True)
+
+    # task | project
+    target_type = Column(String(20), nullable=False)
+    target_id = Column(Integer, nullable=False)
+
+    field = Column(String(40), nullable=False)
+    current_value = Column(String(255), nullable=True)
+    proposed_value = Column(String(255), nullable=False)
+
+    # Why, in the user's terms, and what it was read off. Both stored: a
+    # suggestion you cannot audit is one you have to take on trust.
+    rationale = Column(Text, nullable=False)
+    evidence = Column(Text, nullable=True)
+
+    # pending | accepted | dismissed
+    status = Column(String(20), nullable=False, default="pending", index=True)
+    created_at = Column(DateTime, default=utcnow, index=True)
+    resolved_at = Column(DateTime, nullable=True)
+
+    __table_args__ = (UniqueConstraint("fingerprint", name="uq_suggestion_fingerprint"),)
 
 
 class Attachment(Base):

@@ -57,6 +57,9 @@ server = MCPServer(
         "Prefer `today` for 'what should I be doing' and `insights` for "
         "'where did the time go'. Both are precomputed -- do not recompute "
         "them from the list endpoints.\n\n"
+        "Activity (commits, pull requests) is recorded fact; suggestions "
+        "are proposals waiting on the user. Accept or dismiss one only "
+        "when the user has decided -- present the rationale and ask.\n\n"
         "When writing, say what you changed and why. Task status drives "
         "completed_at and therefore the cycle-time figures, so do not mark "
         "work done unless the user said it is done."
@@ -504,6 +507,67 @@ async def sync_activity(repo: Optional[str] = None, limit: int = 100) -> list:
     return await _call(
         "POST", "/activity/sync", params={"repo": repo, "limit": limit}
     )
+
+
+@server.tool(
+    description=(
+        "The analyst's review of the board: findings (stale work in progress, "
+        "long-standing blockers, overdue tasks, estimate overruns, projects "
+        "past their target) plus any suggestions currently awaiting a "
+        "decision. Read-only. Use this as the basis for a standup or weekly "
+        "write-up rather than recomputing it from the list endpoints -- and "
+        "quote the findings rather than inventing your own."
+    ),
+    annotations=READS,
+)
+async def review(stale_days: int = 7) -> dict:
+    return await _call("GET", "/review", params={"stale_days": stale_days})
+
+
+@server.tool(
+    description=(
+        "Look for new suggestions from the current evidence. Returns only the "
+        "ones newly raised. This proposes; it never changes a task."
+    ),
+    annotations=WRITES,
+)
+async def refresh_suggestions() -> list:
+    return await _call("POST", "/suggestions/refresh")
+
+
+@server.tool(
+    description=(
+        "Suggestions awaiting a decision. `status` accepts pending (the "
+        "default), accepted, dismissed or all. Each carries the rule that "
+        "raised it, the change proposed, and the evidence behind it."
+    ),
+    annotations=READS,
+)
+async def list_suggestions(status: str = "pending") -> list:
+    return await _call("GET", "/suggestions", params={"status": status})
+
+
+@server.tool(
+    description=(
+        "Accept a suggestion and apply its change. Only do this when the user "
+        "has said to -- the whole point of a suggestion is that a person "
+        "decides. Present the rationale and evidence and ask first."
+    ),
+    annotations=WRITES,
+)
+async def accept_suggestion(suggestion_id: int) -> dict:
+    return await _call("POST", f"/suggestions/{suggestion_id}/accept")
+
+
+@server.tool(
+    description=(
+        "Turn a suggestion down. It will not be raised again. As with "
+        "accepting, this is the user's call, not yours."
+    ),
+    annotations=WRITES,
+)
+async def dismiss_suggestion(suggestion_id: int) -> dict:
+    return await _call("POST", f"/suggestions/{suggestion_id}/dismiss")
 
 
 if __name__ == "__main__":

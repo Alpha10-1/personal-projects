@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import models, schemas
+from app import models, schemas, transitions
 from app.db import get_db
 from app.deps import client_source
 from app.enrich import enrich_tasks, serialize
@@ -133,15 +133,8 @@ def update_task(task_id: int, payload: schemas.TaskUpdate, db: Session = Depends
         task_id=task_id,
     )
 
-    if "status" in changes and changes["status"] != task.status:
-        if changes["status"] == "done":
-            task.completed_at = models.utcnow()
-        elif task.status == "done":
-            task.completed_at = None
-        # A task that is no longer blocked has no blocking reason. Leaving the
-        # old one behind makes stale text look current on the board.
-        if changes["status"] != "blocked":
-            task.blocked_reason = None
+    if "status" in changes:
+        transitions.set_task_status(task, changes.pop("status"))
 
     for field, value in changes.items():
         setattr(task, field, value)
@@ -170,6 +163,13 @@ def delete_task(task_id: int, db: Session = Depends(get_db)):
         select(models.TimeLog).where(models.TimeLog.task_id.in_(going))
     ).scalars():
         log.task_id = None
+
+    # Activity is a record of something that happened elsewhere: it outlives
+    # the task it was attributed to and keeps its project link.
+    for event in db.execute(
+        select(models.ActivityEvent).where(models.ActivityEvent.task_id.in_(going))
+    ).scalars():
+        event.task_id = None
 
     # Only direct subtasks go. Anything nested below them is promoted to
     # top-level rather than left pointing at a row that no longer exists.

@@ -169,6 +169,8 @@ def delete_project(project_id: int, db: Session = Depends(get_db)):
     # Each group is flushed before the next: within one flush SQLAlchemy
     # decides its own statement order, which is not necessarily this one.
     for model in (
+        # ActivityEvent references both tasks and projects, so it goes first.
+        models.ActivityEvent,
         models.TimeLog,
         models.Note,
         models.Link,

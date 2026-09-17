@@ -326,6 +326,39 @@ class SyncResult(BaseModel):
     since: Optional[str] = None
 
 
+class FindingOut(BaseModel):
+    rule: str
+    severity: str
+    target_type: str
+    target_id: Optional[int]
+    title: str
+    detail: str
+    evidence: list[str] = []
+
+
+class SuggestionOut(ORMModel):
+    id: int
+    rule: str
+    target_type: str
+    target_id: int
+    field: str
+    current_value: Optional[str]
+    proposed_value: str
+    rationale: str
+    evidence: list[str] = []
+    status: str
+    created_at: Optional[datetime]
+    resolved_at: Optional[datetime]
+    target_title: Optional[str] = None
+
+
+class ReviewOut(BaseModel):
+    generated_at: datetime
+    findings: list[FindingOut]
+    suggestions: list[SuggestionOut]
+    counts: dict[str, int]
+
+
 class AttachmentOut(ORMModel):
     id: int
     project_id: Optional[int]

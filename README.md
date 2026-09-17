@@ -110,6 +110,43 @@ has to declare itself and anything that doesn't — the web UI, curl, a script
 
 ---
 
+## The review: findings and suggestions
+
+`GET /review` is the analyst's reading of the board. Two kinds of output, kept
+apart on purpose:
+
+- **Findings** — observations, computed fresh, never stored. Stale work in
+  progress, long-standing blockers, overdue tasks, estimate overruns,
+  projects past their target date, activity matching no project.
+- **Suggestions** — proposed changes, persisted, waiting on a decision.
+
+Every rule is deterministic. That's the point: a rule that fires can be
+explained, tested and switched off. The *narrative* — the standup paragraph,
+the judgement about what matters this week — is the agent's job, written
+**from** these findings rather than instead of them.
+
+```bash
+curl localhost:8000/review                    # read-only
+curl -X POST localhost:8000/suggestions/refresh
+curl -X POST localhost:8000/suggestions/1/accept
+curl -X POST localhost:8000/suggestions/1/dismiss
+```
+
+**Nothing is applied on its own.** `GET /review` never changes a task, and
+`?refresh=true` only ever *raises* suggestions. Two rules currently propose:
+
+| Rule | Proposes |
+|---|---|
+| `activity_suggests_started` | Commits exist against a task still marked `todo` → `in_progress` |
+| `merged_pr_suggests_done` | A merged PR names the task → `done` |
+
+Accepting applies the change through the same transition as an edit made by
+hand, so `completed_at` and the cycle-time figures stay consistent.
+Dismissing is permanent: the dismissed row keeps its fingerprint, which is
+what stops the rule proposing the same thing again.
+
+---
+
 ## Using it from Claude (MCP)
 
 `backend/mcp_server.py` exposes the tracker as an MCP server, so Claude Code
@@ -134,11 +171,12 @@ cd backend
 PP_API_URL=http://localhost:8000 python mcp_server.py
 ```
 
-Fourteen tools: nine read-only (`today`, `insights`, `list_projects`,
-`list_tasks`, `list_milestones`, `list_time_logs`, `list_notes`, `list_activity`) and five that
-write (`create_task`, `update_task`, `log_time`, `add_note`, `sync_activity`,
-`update_project`). They're annotated with MCP's `read_only_hint` so a client
-can tell the difference before calling.
+Nineteen tools: eleven read-only (`today`, `insights`, `review`, `list_projects`,
+`list_tasks`, `list_milestones`, `list_time_logs`, `list_notes`, `list_activity`,
+`list_suggestions`) and eight that write (`create_task`, `update_task`,
+`log_time`, `add_note`, `update_project`, `sync_activity`, `refresh_suggestions`,
+`accept_suggestion`, `dismiss_suggestion`). They are annotated with MCP's
+`read_only_hint`, so a client can tell the difference before calling.
 
 Every write is appended to `backend/data/agent-audit.jsonl` — including the
 ones that failed — so there's a record of what the agent did that doesn't
