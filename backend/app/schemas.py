@@ -2,12 +2,36 @@
 
 Update schemas use all-optional fields plus `exclude_unset` at the call site,
 so a PATCH that omits a field leaves it alone and one that sends null clears it.
+
+Clearing only makes sense for a column that is actually nullable, so fields
+backed by a NOT NULL column carry `NoNull` (see below). They stay optional --
+a PATCH may still omit them -- but may not be set to null.
 """
 
 from datetime import date, datetime
-from typing import Literal, Optional
+from typing import Annotated, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field
+from pydantic_core import PydanticCustomError
+
+
+def _reject_null(value):
+    """Reject an explicit null on a field that has no nullable column.
+
+    Pydantic does not validate a field's default, so this only ever runs on a
+    value the client actually sent: omitting the field still means "leave it
+    alone" rather than tripping this.
+
+    Raised as a PydanticCustomError rather than a ValueError so the message
+    reaches the UI as-is; a plain ValueError arrives prefixed with
+    "Value error, ", which reads badly next to the field name.
+    """
+    if value is None:
+        raise PydanticCustomError("not_nullable", "cannot be set to null")
+    return value
+
+
+NoNull = AfterValidator(_reject_null)
 
 ProjectStatus = Literal["idea", "planning", "active", "on_hold", "done", "archived"]
 ProjectCategory = Literal["research", "build", "analysis", "learning", "ops", "other"]
@@ -42,11 +66,13 @@ class ProjectCreate(BaseModel):
 
 
 class ProjectUpdate(BaseModel):
-    name: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    name: Annotated[Optional[str], NoNull] = Field(
+        default=None, min_length=1, max_length=255
+    )
     summary: Optional[str] = None
-    status: Optional[ProjectStatus] = None
-    category: Optional[ProjectCategory] = None
-    priority: Optional[Priority] = None
+    status: Annotated[Optional[ProjectStatus], NoNull] = None
+    category: Annotated[Optional[ProjectCategory], NoNull] = None
+    priority: Annotated[Optional[Priority], NoNull] = None
     start_date: Optional[date] = None
     target_date: Optional[date] = None
     objective: Optional[str] = None
@@ -99,11 +125,13 @@ class MilestoneCreate(BaseModel):
 
 
 class MilestoneUpdate(BaseModel):
-    title: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    title: Annotated[Optional[str], NoNull] = Field(
+        default=None, min_length=1, max_length=255
+    )
     detail: Optional[str] = None
     due_date: Optional[date] = None
-    status: Optional[MilestoneStatus] = None
-    position: Optional[int] = None
+    status: Annotated[Optional[MilestoneStatus], NoNull] = None
+    position: Annotated[Optional[int], NoNull] = None
 
 
 class MilestoneOut(ORMModel):
@@ -136,13 +164,15 @@ class TaskCreate(BaseModel):
 
 
 class TaskUpdate(BaseModel):
-    title: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    title: Annotated[Optional[str], NoNull] = Field(
+        default=None, min_length=1, max_length=255
+    )
     project_id: Optional[int] = None
     milestone_id: Optional[int] = None
     parent_task_id: Optional[int] = None
     notes: Optional[str] = None
-    status: Optional[TaskStatus] = None
-    priority: Optional[Priority] = None
+    status: Annotated[Optional[TaskStatus], NoNull] = None
+    priority: Annotated[Optional[Priority], NoNull] = None
     due_date: Optional[date] = None
     estimate_hours: Optional[float] = Field(default=None, ge=0)
     blocked_reason: Optional[str] = None
@@ -180,9 +210,9 @@ class TimeLogCreate(BaseModel):
 
 
 class TimeLogUpdate(BaseModel):
-    work_date: Optional[date] = None
-    hours: Optional[float] = Field(default=None, gt=0, le=24)
-    category: Optional[TimeCategory] = None
+    work_date: Annotated[Optional[date], NoNull] = None
+    hours: Annotated[Optional[float], NoNull] = Field(default=None, gt=0, le=24)
+    category: Annotated[Optional[TimeCategory], NoNull] = None
     project_id: Optional[int] = None
     task_id: Optional[int] = None
     note: Optional[str] = None
@@ -212,11 +242,11 @@ class NoteCreate(BaseModel):
 
 
 class NoteUpdate(BaseModel):
-    body: Optional[str] = Field(default=None, min_length=1)
+    body: Annotated[Optional[str], NoNull] = Field(default=None, min_length=1)
     title: Optional[str] = Field(default=None, max_length=255)
     project_id: Optional[int] = None
-    kind: Optional[NoteKind] = None
-    pinned: Optional[bool] = None
+    kind: Annotated[Optional[NoteKind], NoNull] = None
+    pinned: Annotated[Optional[bool], NoNull] = None
 
 
 class NoteOut(ORMModel):
@@ -240,10 +270,12 @@ class LinkCreate(BaseModel):
 
 
 class LinkUpdate(BaseModel):
-    title: Optional[str] = Field(default=None, min_length=1, max_length=255)
-    url: Optional[str] = Field(default=None, min_length=1)
+    title: Annotated[Optional[str], NoNull] = Field(
+        default=None, min_length=1, max_length=255
+    )
+    url: Annotated[Optional[str], NoNull] = Field(default=None, min_length=1)
     project_id: Optional[int] = None
-    kind: Optional[LinkKind] = None
+    kind: Annotated[Optional[LinkKind], NoNull] = None
     note: Optional[str] = None
 
 

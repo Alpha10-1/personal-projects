@@ -5,8 +5,6 @@ _validate_refs (SQLite does not enforce them) and the status side effects
 on completed_at and blocked_reason.
 """
 
-import pytest
-
 from conftest import TODAY, days_ago
 
 
@@ -212,12 +210,6 @@ def test_subtask_counts_appear_on_the_parent(client):
     assert body["subtask_done"] == 1
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Known bug: TaskUpdate.title is Optional, so an explicit null "
-    "reaches a NOT NULL column and raises IntegrityError (500) instead of "
-    "being rejected as a 422.",
-)
 def test_patch_title_to_null_is_rejected_not_a_server_error(client):
     task = create(client)
 

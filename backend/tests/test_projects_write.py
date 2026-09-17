@@ -1,8 +1,6 @@
 """Write paths for /projects: validation, status side effects, and the
 archive / duplicate / delete behaviours the UI depends on."""
 
-import pytest
-
 from conftest import TODAY, days_ago, days_ahead
 
 
@@ -276,12 +274,6 @@ def test_duplicate_unknown_project_is_404(client):
     assert client.post("/projects/999/duplicate").status_code == 404
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Known bug: ProjectUpdate.name is Optional, so an explicit null "
-    "reaches a NOT NULL column and raises IntegrityError (500) instead of "
-    "being rejected as a 422.",
-)
 def test_patch_name_to_null_is_rejected_not_a_server_error(client):
     project = create(client)
 
