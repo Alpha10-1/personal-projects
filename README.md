@@ -63,6 +63,46 @@ After the first run, starting up again is just `.\.venv\Scripts\Activate.ps1` +
 
 ---
 
+## Using it from Claude (MCP)
+
+`backend/mcp_server.py` exposes the tracker as an MCP server, so Claude Code
+can read and update it conversationally — "what's overdue?", "log 2 hours
+against the forecast model", "write up this week as a note".
+
+It talks to the HTTP API rather than the database, so **the backend has to be
+running**, and every rule the API enforces applies to the agent exactly as it
+does to the UI. Pointing it at a hosted backend later is a change of
+`PP_API_URL`, not a rewrite.
+
+```bash
+cd backend
+pip install -r requirements-mcp.txt
+```
+
+`.mcp.json` in the repo root registers it for Claude Code; restart Claude Code
+and approve the server when prompted. To run it by hand:
+
+```bash
+cd backend
+PP_API_URL=http://localhost:8000 python mcp_server.py
+```
+
+Twelve tools: seven read-only (`today`, `insights`, `list_projects`,
+`list_tasks`, `list_milestones`, `list_time_logs`, `list_notes`) and five that
+write (`create_task`, `update_task`, `log_time`, `add_note`,
+`update_project`). They're annotated with MCP's `read_only_hint` so a client
+can tell the difference before calling.
+
+Every write is appended to `backend/data/agent-audit.jsonl` — including the
+ones that failed — so there's a record of what the agent did that doesn't
+depend on the agent.
+
+> The paths in `.mcp.json` assume the Windows venv layout
+> (`backend/.venv/Scripts/python.exe`). On macOS or Linux it's
+> `backend/.venv/bin/python`.
+
+---
+
 ## Tests and linting
 
 Both run in CI on every push and pull request (`.github/workflows/ci.yml`).
