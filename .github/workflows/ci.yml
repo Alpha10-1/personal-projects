@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Re-run CI without inventing a commit -- useful when a run failed for a
+  # reason outside the code, such as the account being unable to start jobs.
+  workflow_dispatch:
 
 # A new push to the same branch makes the previous run irrelevant.
 concurrency:
