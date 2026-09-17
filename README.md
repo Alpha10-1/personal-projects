@@ -223,7 +223,11 @@ depend on the agent.
 
 ## Tests and linting
 
-Both run in CI on every push and pull request (`.github/workflows/ci.yml`).
+Both run in CI on every push and pull request (`.github/workflows/ci.yml`),
+and can be re-run by hand from the Actions tab. Every run reports its
+pytest counts as an annotation on the run page, and a red one lists the
+failing test ids there too — so a build can be diagnosed without
+downloading the log archive, which needs credentials.
 
 Backend — install the dev extras once, then:
 
