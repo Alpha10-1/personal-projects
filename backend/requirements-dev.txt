@@ -1,4 +1,7 @@
 -r requirements.txt
+# The MCP server ships with the repo and has tests, so the dev environment
+# needs its dependencies too -- otherwise `pytest` can't even collect them.
+-r requirements-mcp.txt
 pytest>=8.0
 httpx>=0.27
 ruff>=0.6
