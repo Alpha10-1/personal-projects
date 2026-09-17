@@ -10,8 +10,8 @@ from datetime import date, datetime, timedelta
 
 from sqlalchemy import select
 
-from app.db import SessionLocal, init_db
 from app import models
+from app.db import SessionLocal, init_db
 
 
 def seed():
@@ -35,7 +35,9 @@ def seed():
                 start_date=today - timedelta(days=38),
                 target_date=today + timedelta(days=24),
                 objective="Give planning a defensible weekly number instead of a gut feel.",
-                definition_of_done="Backtested MAPE under 12% and a dashboard planning actually opens.",
+                definition_of_done=(
+                    "Backtested MAPE under 12% and a dashboard planning actually opens."
+                ),
                 stakeholder="Planning superintendent",
                 tech_stack="Python, Prophet, Power BI",
             ),

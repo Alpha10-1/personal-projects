@@ -6,6 +6,7 @@ than just shapes.
 """
 
 from datetime import date, timedelta
+from itertools import pairwise
 
 from conftest import TODAY, WEEK_START, at, days_ago
 
@@ -75,7 +76,7 @@ def test_hours_trend_buckets_by_monday_and_totals_match_categories(client, make)
     weeks = [date.fromisoformat(w["week"]) for w in body["hours_trend"]]
     assert all(w.weekday() == 0 for w in weeks)
     assert weeks == sorted(weeks)
-    assert all(b - a == timedelta(days=7) for a, b in zip(weeks, weeks[1:]))
+    assert all(b - a == timedelta(days=7) for a, b in pairwise(weeks))
 
     this_week = trend[WEEK_START.isoformat()]
     assert this_week["build"] == 3.0

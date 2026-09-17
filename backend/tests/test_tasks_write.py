@@ -68,7 +68,7 @@ def test_create_rejects_milestone_from_a_different_project(client):
     owner = make_project(client, "owner")
     other = make_project(client, "other")
     milestone = client.post(
-        "/projects/%d/milestones" % owner["id"], json={"title": "m"}
+        f"/projects/{owner['id']}/milestones", json={"title": "m"}
     ).json()
 
     response = client.post(
@@ -83,7 +83,7 @@ def test_create_rejects_milestone_from_a_different_project(client):
 def test_create_accepts_a_milestone_from_its_own_project(client):
     project = make_project(client)
     milestone = client.post(
-        "/projects/%d/milestones" % project["id"], json={"title": "m"}
+        f"/projects/{project['id']}/milestones", json={"title": "m"}
     ).json()
 
     body = create(client, project_id=project["id"], milestone_id=milestone["id"])
@@ -97,7 +97,7 @@ def test_create_accepts_a_milestone_from_its_own_project(client):
 def test_patch_leaves_omitted_fields_alone(client):
     task = create(client, notes="keep me", priority="high")
 
-    body = client.patch("/tasks/%d" % task["id"], json={"priority": "low"}).json()
+    body = client.patch(f"/tasks/{task['id']}", json={"priority": "low"}).json()
 
     assert body["priority"] == "low"
     assert body["notes"] == "keep me"
@@ -105,7 +105,7 @@ def test_patch_leaves_omitted_fields_alone(client):
 
 def test_patch_to_done_stamps_completed_at_and_reopening_clears_it(client):
     task = create(client)
-    url = "/tasks/%d" % task["id"]
+    url = f"/tasks/{task['id']}"
 
     assert client.patch(url, json={"status": "done"}).json()["completed_at"] is not None
     assert client.patch(url, json={"status": "todo"}).json()["completed_at"] is None
@@ -114,7 +114,7 @@ def test_patch_to_done_stamps_completed_at_and_reopening_clears_it(client):
 def test_leaving_blocked_clears_the_blocked_reason(client):
     task = create(client, status="blocked", blocked_reason="waiting on the extract")
 
-    body = client.patch("/tasks/%d" % task["id"], json={"status": "in_progress"}).json()
+    body = client.patch(f"/tasks/{task['id']}", json={"status": "in_progress"}).json()
 
     assert body["status"] == "in_progress"
     assert body["blocked_reason"] is None
@@ -123,7 +123,7 @@ def test_leaving_blocked_clears_the_blocked_reason(client):
 def test_staying_blocked_keeps_the_blocked_reason(client):
     task = create(client, status="blocked", blocked_reason="waiting on the extract")
 
-    body = client.patch("/tasks/%d" % task["id"], json={"priority": "high"}).json()
+    body = client.patch(f"/tasks/{task['id']}", json={"priority": "high"}).json()
 
     assert body["blocked_reason"] == "waiting on the extract"
 
@@ -132,7 +132,7 @@ def test_a_task_cannot_become_its_own_parent(client):
     task = create(client)
 
     response = client.patch(
-        "/tasks/%d" % task["id"], json={"parent_task_id": task["id"]}
+        f"/tasks/{task['id']}", json={"parent_task_id": task["id"]}
     )
 
     assert response.status_code == 400
@@ -145,12 +145,12 @@ def test_patch_revalidates_against_the_tasks_existing_project(client):
     owner = make_project(client, "owner")
     other = make_project(client, "other")
     milestone = client.post(
-        "/projects/%d/milestones" % owner["id"], json={"title": "m"}
+        f"/projects/{owner['id']}/milestones", json={"title": "m"}
     ).json()
     task = create(client, project_id=owner["id"], milestone_id=milestone["id"])
 
     response = client.patch(
-        "/tasks/%d" % task["id"], json={"project_id": other["id"]}
+        f"/tasks/{task['id']}", json={"project_id": other["id"]}
     )
 
     assert response.status_code == 400
@@ -172,7 +172,7 @@ def test_delete_removes_subtasks_but_keeps_logged_hours(client):
         json={"work_date": TODAY.isoformat(), "hours": 2, "task_id": parent["id"]},
     )
 
-    assert client.delete("/tasks/%d" % parent["id"]).status_code == 204
+    assert client.delete(f"/tasks/{parent['id']}").status_code == 204
 
     assert client.get("/tasks").json() == []
     # The hours were really spent, so the log survives and just loses its link.
@@ -204,7 +204,7 @@ def test_subtask_counts_appear_on_the_parent(client):
     create(client, title="a", parent_task_id=parent["id"], status="done")
     create(client, title="b", parent_task_id=parent["id"])
 
-    body = client.get("/tasks/%d" % parent["id"]).json()
+    body = client.get(f"/tasks/{parent['id']}").json()
 
     assert body["subtask_total"] == 2
     assert body["subtask_done"] == 1
@@ -213,4 +213,4 @@ def test_subtask_counts_appear_on_the_parent(client):
 def test_patch_title_to_null_is_rejected_not_a_server_error(client):
     task = create(client)
 
-    assert client.patch("/tasks/%d" % task["id"], json={"title": None}).status_code == 422
+    assert client.patch(f"/tasks/{task['id']}", json={"title": None}).status_code == 422

@@ -62,7 +62,7 @@ def test_note_rejects_unknown_project(client):
 def test_patch_note_validates_a_reassigned_project(client):
     note = client.post("/notes", json={"body": "b"}).json()
 
-    response = client.patch("/notes/%d" % note["id"], json={"project_id": 999})
+    response = client.patch(f"/notes/{note['id']}", json={"project_id": 999})
 
     assert response.status_code == 400
 
@@ -90,9 +90,9 @@ def test_note_search_matches_title_and_body(client):
 def test_delete_note(client):
     note = client.post("/notes", json={"body": "b"}).json()
 
-    assert client.delete("/notes/%d" % note["id"]).status_code == 204
+    assert client.delete(f"/notes/{note['id']}").status_code == 204
     assert client.get("/notes").json() == []
-    assert client.delete("/notes/%d" % note["id"]).status_code == 404
+    assert client.delete(f"/notes/{note['id']}").status_code == 404
 
 
 # --- Links ------------------------------------------------------------------
@@ -131,7 +131,7 @@ def test_link_rejects_unknown_project(client):
 def test_delete_link(client):
     link = client.post("/links", json={"title": "t", "url": "x.com"}).json()
 
-    assert client.delete("/links/%d" % link["id"]).status_code == 204
+    assert client.delete(f"/links/{link['id']}").status_code == 204
     assert client.get("/links").json() == []
 
 
@@ -152,7 +152,7 @@ def test_uploaded_bytes_come_back_on_download(client):
     content = b"the exact bytes\n"
     record = upload(client, name="notes.txt", content=content).json()
 
-    response = client.get("/files/%d/download" % record["id"])
+    response = client.get(f"/files/{record['id']}/download")
 
     assert response.status_code == 200
     assert response.content == content
@@ -201,8 +201,8 @@ def test_uploads_with_the_same_name_do_not_collide(client):
     second = upload(client, name="report.csv", content=b"second").json()
 
     assert first["id"] != second["id"]
-    assert client.get("/files/%d/download" % first["id"]).content == b"first"
-    assert client.get("/files/%d/download" % second["id"]).content == b"second"
+    assert client.get(f"/files/{first['id']}/download").content == b"first"
+    assert client.get(f"/files/{second['id']}/download").content == b"second"
 
 
 def test_delete_removes_the_row_and_the_file_on_disk(client, upload_dir_count):
@@ -210,11 +210,11 @@ def test_delete_removes_the_row_and_the_file_on_disk(client, upload_dir_count):
     record = upload(client).json()
     assert upload_dir_count() == before + 1
 
-    assert client.delete("/files/%d" % record["id"]).status_code == 204
+    assert client.delete(f"/files/{record['id']}").status_code == 204
 
     assert upload_dir_count() == before
     assert client.get("/files").json() == []
-    assert client.get("/files/%d/download" % record["id"]).status_code == 404
+    assert client.get(f"/files/{record['id']}/download").status_code == 404
 
 
 def test_download_reports_410_when_the_file_vanished_from_disk(client):
@@ -223,7 +223,7 @@ def test_download_reports_410_when_the_file_vanished_from_disk(client):
     for path in UPLOAD_DIR.iterdir():
         path.unlink()
 
-    response = client.get("/files/%d/download" % record["id"])
+    response = client.get(f"/files/{record['id']}/download")
 
     assert response.status_code == 410
     assert response.json()["detail"] == "File is missing from disk"

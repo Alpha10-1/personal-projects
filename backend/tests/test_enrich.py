@@ -5,10 +5,10 @@ is tested directly rather than through a route.
 """
 
 import pytest
+from conftest import TODAY, at
 
 from app import models
 from app.enrich import compute_progress, enrich_tasks
-from conftest import TODAY, at
 
 
 def project(**kw):

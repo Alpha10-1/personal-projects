@@ -54,7 +54,9 @@ export default function TimeLogPanel({
     [projectId, days],
   );
 
-  const rows = logs.data || [];
+  // Memoised so the empty-state fallback isn't a fresh array on every render,
+  // which would invalidate every downstream useMemo that depends on it.
+  const rows = useMemo(() => logs.data || [], [logs.data]);
   const total = useMemo(
     () => rows.reduce((sum, row) => sum + Number(row.hours || 0), 0),
     [rows],

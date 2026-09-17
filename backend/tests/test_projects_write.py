@@ -57,7 +57,7 @@ def test_create_rejects_progress_override_outside_0_100(client):
 def test_patch_leaves_omitted_fields_alone(client):
     project = create(client, summary="original", priority="high")
 
-    body = client.patch("/projects/%d" % project["id"], json={"priority": "low"}).json()
+    body = client.patch(f"/projects/{project['id']}", json={"priority": "low"}).json()
 
     assert body["priority"] == "low"
     assert body["summary"] == "original"
@@ -66,14 +66,14 @@ def test_patch_leaves_omitted_fields_alone(client):
 def test_patch_with_explicit_null_clears_the_field(client):
     project = create(client, summary="original")
 
-    body = client.patch("/projects/%d" % project["id"], json={"summary": None}).json()
+    body = client.patch(f"/projects/{project['id']}", json={"summary": None}).json()
 
     assert body["summary"] is None
 
 
 def test_patch_to_done_stamps_completed_at_and_reopening_clears_it(client):
     project = create(client, status="active")
-    url = "/projects/%d" % project["id"]
+    url = f"/projects/{project['id']}"
 
     done = client.patch(url, json={"status": "done"}).json()
     assert done["completed_at"] is not None
@@ -86,7 +86,7 @@ def test_patch_to_the_same_status_does_not_restamp_completed_at(client):
     project = create(client, status="done")
     first = project["completed_at"]
 
-    body = client.patch("/projects/%d" % project["id"], json={"status": "done"}).json()
+    body = client.patch(f"/projects/{project['id']}", json={"status": "done"}).json()
 
     assert body["completed_at"] == first
 
@@ -97,7 +97,7 @@ def test_progress_override_wins_over_task_counts(client):
     client.post("/tasks", json={"title": "b", "project_id": project["id"]})
 
     body = client.patch(
-        "/projects/%d" % project["id"], json={"progress_override": 80}
+        f"/projects/{project['id']}", json={"progress_override": 80}
     ).json()
 
     assert body["task_total"] == 2
@@ -115,7 +115,7 @@ def test_patch_unknown_project_is_404(client):
 def test_archive_sets_status_and_timestamp(client):
     project = create(client, status="active")
 
-    body = client.post("/projects/%d/archive" % project["id"]).json()
+    body = client.post(f"/projects/{project['id']}/archive").json()
 
     assert body["status"] == "archived"
     assert body["archived_at"] is not None
@@ -123,9 +123,9 @@ def test_archive_sets_status_and_timestamp(client):
 
 def test_unarchive_returns_unfinished_work_to_on_hold(client):
     project = create(client, status="active")
-    client.post("/projects/%d/archive" % project["id"])
+    client.post(f"/projects/{project['id']}/archive")
 
-    body = client.post("/projects/%d/unarchive" % project["id"]).json()
+    body = client.post(f"/projects/{project['id']}/unarchive").json()
 
     assert body["archived_at"] is None
     assert body["status"] == "on_hold"
@@ -133,16 +133,16 @@ def test_unarchive_returns_unfinished_work_to_on_hold(client):
 
 def test_unarchive_returns_finished_work_to_done(client):
     project = create(client, status="done")
-    client.post("/projects/%d/archive" % project["id"])
+    client.post(f"/projects/{project['id']}/archive")
 
-    body = client.post("/projects/%d/unarchive" % project["id"]).json()
+    body = client.post(f"/projects/{project['id']}/unarchive").json()
 
     assert body["status"] == "done"
 
 
 def test_archived_projects_are_hidden_from_the_default_listing(client):
     project = create(client)
-    client.post("/projects/%d/archive" % project["id"])
+    client.post(f"/projects/{project['id']}/archive")
 
     assert client.get("/projects").json() == []
     assert len(client.get("/projects", params={"include_archived": True}).json()) == 1
@@ -154,7 +154,7 @@ def test_archived_projects_are_hidden_from_the_default_listing(client):
 def test_delete_removes_the_project_and_all_attached_rows(client):
     project = create(client)
     pid = project["id"]
-    milestone = client.post("/projects/%d/milestones" % pid, json={"title": "m"}).json()
+    milestone = client.post(f"/projects/{pid}/milestones", json={"title": "m"}).json()
     client.post(
         "/tasks",
         json={"title": "t", "project_id": pid, "milestone_id": milestone["id"]},
@@ -166,14 +166,14 @@ def test_delete_removes_the_project_and_all_attached_rows(client):
     client.post("/notes", json={"body": "n", "project_id": pid})
     client.post("/links", json={"title": "l", "url": "example.com", "project_id": pid})
 
-    assert client.delete("/projects/%d" % pid).status_code == 204
+    assert client.delete(f"/projects/{pid}").status_code == 204
 
-    assert client.get("/projects/%d" % pid).status_code == 404
+    assert client.get(f"/projects/{pid}").status_code == 404
     assert client.get("/tasks").json() == []
     assert client.get("/time-logs").json() == []
     assert client.get("/notes").json() == []
     assert client.get("/links").json() == []
-    assert client.get("/projects/%d/milestones" % pid).json() == []
+    assert client.get(f"/projects/{pid}/milestones").json() == []
 
 
 def test_delete_leaves_other_projects_untouched(client):
@@ -181,7 +181,7 @@ def test_delete_leaves_other_projects_untouched(client):
     keeper = create(client, name="keeper")
     client.post("/tasks", json={"title": "survivor", "project_id": keeper["id"]})
 
-    client.delete("/projects/%d" % doomed["id"])
+    client.delete(f"/projects/{doomed['id']}")
 
     assert [t["title"] for t in client.get("/tasks").json()] == ["survivor"]
 
@@ -197,7 +197,7 @@ def test_duplicate_copies_the_plan_and_resets_progress(client):
     project = create(client, name="Pipeline", status="active", tech_stack="dbt")
     pid = project["id"]
     milestone = client.post(
-        "/projects/%d/milestones" % pid,
+        f"/projects/{pid}/milestones",
         json={"title": "Phase 1", "due_date": days_ahead(5).isoformat()},
     ).json()
     client.post(
@@ -215,7 +215,7 @@ def test_duplicate_copies_the_plan_and_resets_progress(client):
         json={"work_date": TODAY.isoformat(), "hours": 4, "project_id": pid},
     )
 
-    clone = client.post("/projects/%d/duplicate" % pid).json()
+    clone = client.post(f"/projects/{pid}/duplicate").json()
 
     assert clone["name"] == "Pipeline (copy)"
     assert clone["status"] == "planning"
@@ -229,7 +229,7 @@ def test_duplicate_copies_the_plan_and_resets_progress(client):
     assert [t["status"] for t in clone_tasks] == ["todo"]
     assert clone_tasks[0]["due_date"] is None
 
-    clone_milestones = client.get("/projects/%d/milestones" % clone["id"]).json()
+    clone_milestones = client.get(f"/projects/{clone['id']}/milestones").json()
     assert [m["title"] for m in clone_milestones] == ["Phase 1"]
     assert clone_milestones[0]["due_date"] is None
     # The copied task points at the copied milestone, not the original.
@@ -245,7 +245,7 @@ def test_duplicate_rewires_subtasks_to_their_copied_parent(client):
         json={"title": "child", "project_id": pid, "parent_task_id": parent["id"]},
     )
 
-    clone = client.post("/projects/%d/duplicate" % pid).json()
+    clone = client.post(f"/projects/{pid}/duplicate").json()
 
     tasks = {
         t["title"]: t
@@ -258,16 +258,16 @@ def test_duplicate_rewires_subtasks_to_their_copied_parent(client):
 def test_duplicate_can_skip_tasks_and_milestones(client):
     project = create(client)
     pid = project["id"]
-    client.post("/projects/%d/milestones" % pid, json={"title": "m"})
+    client.post(f"/projects/{pid}/milestones", json={"title": "m"})
     client.post("/tasks", json={"title": "t", "project_id": pid})
 
     clone = client.post(
-        "/projects/%d/duplicate" % pid,
+        f"/projects/{pid}/duplicate",
         params={"copy_tasks": False, "copy_milestones": False},
     ).json()
 
     assert client.get("/tasks", params={"project_id": clone["id"]}).json() == []
-    assert client.get("/projects/%d/milestones" % clone["id"]).json() == []
+    assert client.get(f"/projects/{clone['id']}/milestones").json() == []
 
 
 def test_duplicate_unknown_project_is_404(client):
@@ -277,4 +277,4 @@ def test_duplicate_unknown_project_is_404(client):
 def test_patch_name_to_null_is_rejected_not_a_server_error(client):
     project = create(client)
 
-    assert client.patch("/projects/%d" % project["id"], json={"name": None}).status_code == 422
+    assert client.patch(f"/projects/{project['id']}", json={"name": None}).status_code == 422

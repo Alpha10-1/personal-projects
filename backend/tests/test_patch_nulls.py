@@ -8,7 +8,6 @@ clear as before.
 """
 
 import pytest
-
 from conftest import TODAY
 
 
@@ -18,7 +17,7 @@ def rows(client):
     project = client.post("/projects", json={"name": "P"}).json()
     task = client.post("/tasks", json={"title": "T"}).json()
     milestone = client.post(
-        "/projects/%d/milestones" % project["id"], json={"title": "M"}
+        f"/projects/{project['id']}/milestones", json={"title": "M"}
     ).json()
     log = client.post(
         "/time-logs", json={"work_date": TODAY.isoformat(), "hours": 1}
@@ -26,12 +25,12 @@ def rows(client):
     note = client.post("/notes", json={"body": "B"}).json()
     link = client.post("/links", json={"title": "L", "url": "x.com"}).json()
     return {
-        "project": "/projects/%d" % project["id"],
-        "task": "/tasks/%d" % task["id"],
-        "milestone": "/milestones/%d" % milestone["id"],
-        "time_log": "/time-logs/%d" % log["id"],
-        "note": "/notes/%d" % note["id"],
-        "link": "/links/%d" % link["id"],
+        "project": f"/projects/{project['id']}",
+        "task": f"/tasks/{task['id']}",
+        "milestone": f"/milestones/{milestone['id']}",
+        "time_log": f"/time-logs/{log['id']}",
+        "note": f"/notes/{note['id']}",
+        "link": f"/links/{link['id']}",
     }
 
 
@@ -79,7 +78,7 @@ NULLABLE = [
 def test_explicit_null_is_rejected_with_422(client, rows, resource, field):
     response = client.patch(rows[resource], json={field: None})
 
-    assert response.status_code == 422, "%s.%s" % (resource, field)
+    assert response.status_code == 422, f"{resource}.{field}"
 
 
 @pytest.mark.parametrize("resource,field", NON_NULLABLE)
@@ -95,7 +94,7 @@ def test_rejection_names_the_offending_field(client, rows, resource, field):
 def test_nullable_fields_still_clear(client, rows, resource, field):
     response = client.patch(rows[resource], json={field: None})
 
-    assert response.status_code == 200, "%s.%s: %s" % (resource, field, response.text)
+    assert response.status_code == 200, f"{resource}.{field}: {response.text}"
     assert response.json()[field] is None
 
 

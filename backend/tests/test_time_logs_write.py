@@ -111,7 +111,7 @@ def test_a_log_can_belong_to_neither_a_task_nor_a_project(client):
 def test_patch_updates_hours_and_leaves_the_rest(client):
     log = create(client, note="morning session", category="research")
 
-    body = client.patch("/time-logs/%d" % log["id"], json={"hours": 3.25}).json()
+    body = client.patch(f"/time-logs/{log['id']}", json={"hours": 3.25}).json()
 
     assert body["hours"] == 3.25
     assert body["note"] == "morning session"
@@ -121,7 +121,7 @@ def test_patch_updates_hours_and_leaves_the_rest(client):
 def test_patch_rejects_out_of_range_hours(client):
     log = create(client)
 
-    response = client.patch("/time-logs/%d" % log["id"], json={"hours": 0})
+    response = client.patch(f"/time-logs/{log['id']}", json={"hours": 0})
 
     assert response.status_code == 422
 
@@ -139,7 +139,7 @@ def test_repointing_a_log_at_a_new_task_moves_its_project(client):
     assert log["project_id"] == first["id"]
 
     body = client.patch(
-        "/time-logs/%d" % log["id"], json={"task_id": task_b["id"]}
+        f"/time-logs/{log['id']}", json={"task_id": task_b["id"]}
     ).json()
 
     assert body["project_id"] == second["id"]
@@ -152,7 +152,7 @@ def test_patch_unknown_log_is_404(client):
 def test_delete_removes_the_log(client):
     log = create(client)
 
-    assert client.delete("/time-logs/%d" % log["id"]).status_code == 204
+    assert client.delete(f"/time-logs/{log['id']}").status_code == 204
     assert client.get("/time-logs").json() == []
 
 

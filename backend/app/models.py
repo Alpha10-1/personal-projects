@@ -6,7 +6,7 @@ work (a one-off request, half an hour reading a paper) doesn't belong to a
 project yet, and forcing it to would just mean it never gets recorded.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import (
     Boolean,
@@ -24,7 +24,7 @@ from app.db import Base
 
 
 def utcnow():
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 class Project(Base):

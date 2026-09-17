@@ -173,7 +173,10 @@ def insights(db: Session = Depends(get_db), days: int = Query(56, ge=7, le=365))
     )
     created = list(
         db.execute(
-            select(models.Task).where(models.Task.created_at.is_not(None), models.Task.created_at >= start_dt)
+            select(models.Task).where(
+                models.Task.created_at.is_not(None),
+                models.Task.created_at >= start_dt,
+            )
         ).scalars()
     )
     closed_by_week = defaultdict(int)

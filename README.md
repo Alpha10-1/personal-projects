@@ -63,6 +63,29 @@ After the first run, starting up again is just `.\.venv\Scripts\Activate.ps1` +
 
 ---
 
+## Tests and linting
+
+Both run in CI on every push and pull request (`.github/workflows/ci.yml`).
+
+Backend — install the dev extras once, then:
+
+```bash
+cd backend
+pip install -r requirements-dev.txt
+pytest          # tests point PP_DATA_DIR at a temp dir, so your data is untouched
+ruff check .
+```
+
+Frontend — Next 16 removed `next lint`, so linting is the ESLint CLI:
+
+```bash
+npm run lint    # eslint .
+npm run lint:fix
+npm run build
+```
+
+---
+
 ## Where your data lives
 
 Everything is in `backend/data/`:

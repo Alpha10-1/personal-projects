@@ -1,0 +1,25 @@
+# 100 fits the existing code: only one line in app/ was over it.
+line-length = 100
+target-version = "py311"
+
+exclude = [".venv", "data"]
+
+[lint]
+# pycodestyle, pyflakes, isort, bugbear, comprehensions, pyupgrade.
+select = ["E", "F", "I", "B", "C4", "UP"]
+
+ignore = [
+    # `Depends(get_db)`, `Query(...)`, `File(...)` and `Form(...)` in argument
+    # defaults are how FastAPI declares dependencies -- the thing this rule
+    # warns about is the framework's entire calling convention here.
+    "B008",
+    # The codebase uses Optional[X] consistently. Rewriting 142 annotations to
+    # X | None would be churn with no behavioural change, so the existing style
+    # is the one enforced.
+    "UP045",
+]
+
+[lint.per-file-ignores]
+# conftest sets PP_DATA_DIR before importing the app, so its imports
+# deliberately do not all sit at the top of the file.
+"tests/conftest.py" = ["E402"]

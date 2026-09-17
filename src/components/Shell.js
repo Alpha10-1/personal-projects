@@ -38,6 +38,11 @@ function ThemeToggle() {
   useEffect(() => {
     const stored = window.localStorage.getItem("pp-theme");
     if (stored === "light" || stored === "dark") {
+      // set-state-in-effect is suppressed rather than fixed: localStorage is
+      // unreadable during SSR, so this genuinely cannot move into render or
+      // into a lazy initialiser without a hydration mismatch. It runs once on
+      // mount, so the cascading render the rule guards against is bounded.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setTheme(stored);
       document.documentElement.setAttribute("data-theme", stored);
     }
@@ -74,7 +79,11 @@ export default function Shell({ children }) {
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
 
+  // Closing the mobile menu on navigation. Suppressed rather than moved into
+  // the link's onClick because this also covers back/forward navigation,
+  // which no click handler sees.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setMenuOpen(false);
   }, [pathname]);
 
