@@ -134,22 +134,54 @@ def delete_project(project_id: int, db: Session = Depends(get_db)):
     """Permanently remove a project and everything attached to it.
 
     Archiving is the reversible option and what the UI offers first; this is
-    the escape hatch for a project created by mistake. Child rows are removed
-    explicitly because SQLite does not enforce the foreign keys by default.
+    the escape hatch for a project created by mistake.
+
+    Order matters: rows are removed dependants-first so nothing is ever left
+    pointing at a row that has already gone. Anything outside the project that
+    referenced one of its tasks -- a subtask filed under another project, or a
+    time log entered against a task -- has that link cleared rather than being
+    deleted along with it.
     """
     project = get_project_or_404(db, project_id)
+
+    task_ids = [
+        t.id
+        for t in db.execute(
+            select(models.Task).where(models.Task.project_id == project_id)
+        ).scalars()
+    ]
+
+    if task_ids:
+        # Clearing these first covers both the survivors and the references
+        # the project's own tasks hold on each other.
+        for log in db.execute(
+            select(models.TimeLog).where(models.TimeLog.task_id.in_(task_ids))
+        ).scalars():
+            log.task_id = None
+        for child in db.execute(
+            select(models.Task).where(models.Task.parent_task_id.in_(task_ids))
+        ).scalars():
+            child.parent_task_id = None
+        db.flush()
+
+    # Time logs, notes, links and files reference only the project. Tasks
+    # reference milestones, so they go before them, and the project last.
+    # Each group is flushed before the next: within one flush SQLAlchemy
+    # decides its own statement order, which is not necessarily this one.
     for model in (
-        models.Task,
-        models.Milestone,
         models.TimeLog,
         models.Note,
         models.Link,
         models.Attachment,
+        models.Task,
+        models.Milestone,
     ):
         for row in db.execute(
             select(model).where(model.project_id == project_id)
         ).scalars():
             db.delete(row)
+        db.flush()
+
     db.delete(project)
     db.commit()
 

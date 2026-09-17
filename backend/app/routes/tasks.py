@@ -150,15 +150,39 @@ def update_task(task_id: int, payload: schemas.TaskUpdate, db: Session = Depends
 def delete_task(task_id: int, db: Session = Depends(get_db)):
     task = get_task_or_404(db, task_id)
     # Subtasks are part of the task, not independent items -- they go with it.
-    for child in db.execute(
-        select(models.Task).where(models.Task.parent_task_id == task_id)
-    ).scalars():
-        db.delete(child)
+    child_ids = [
+        t.id
+        for t in db.execute(
+            select(models.Task).where(models.Task.parent_task_id == task_id)
+        ).scalars()
+    ]
+    going = [task_id, *child_ids]
+
     # Time already logged is a record of hours actually spent, so it survives
-    # the task and simply loses its task link.
+    # the task and simply loses its task link. That applies to hours logged
+    # against a subtask too, not just the task being deleted.
     for log in db.execute(
-        select(models.TimeLog).where(models.TimeLog.task_id == task_id)
+        select(models.TimeLog).where(models.TimeLog.task_id.in_(going))
     ).scalars():
         log.task_id = None
+
+    # Only direct subtasks go. Anything nested below them is promoted to
+    # top-level rather than left pointing at a row that no longer exists.
+    if child_ids:
+        for grandchild in db.execute(
+            select(models.Task).where(models.Task.parent_task_id.in_(child_ids))
+        ).scalars():
+            grandchild.parent_task_id = None
+
+    # The subtasks' own link to this task is cleared before anything is
+    # deleted. The models declare no relationship(), so SQLAlchemy batches the
+    # deletes into one statement and cannot know to remove a child before its
+    # parent; dropping the link first makes that order irrelevant.
+    for child_id in child_ids:
+        db.get(models.Task, child_id).parent_task_id = None
+    db.flush()
+
+    for child_id in child_ids:
+        db.delete(db.get(models.Task, child_id))
     db.delete(task)
     db.commit()
