@@ -55,18 +55,36 @@ jobs:
       - name: Lint
         run: ruff check .
 
-      # pipefail so the step still fails on a red suite despite the tee.
+      # pipefail so the step still fails on a red suite despite the tee. No -q
+      # here: pytest.ini already sets it, and a second one suppresses the
+      # counts line the next step reports.
       - name: Test
         run: |
           set -o pipefail
-          pytest --tb=short -q 2>&1 | tee "$RUNNER_TEMP/pytest.txt"
+          pytest --tb=short 2>&1 | tee "$RUNNER_TEMP/pytest.txt"
 
-      # Annotations show up on the run page itself, so a red build can be read
-      # without downloading the log archive.
+      # Annotations show up on the run page itself, so a build can be read
+      # without downloading the log archive, which needs credentials.
+      #
+      # The counts go up even when the suite is green: a green tick only says
+      # pytest exited 0, not how much it ran. A collection that quietly loses
+      # a file looks identical from the outside.
+      - name: Report the counts
+        if: success() || failure()
+        run: |
+          if [ ! -f "$RUNNER_TEMP/pytest.txt" ]; then
+            echo "::notice title=pytest::did not run"
+            exit 0
+          fi
+          # pytest's counts are always its last non-empty line, however the
+          # run ended. Matching on words like "passed" misses the endings that
+          # lead with a deselected or error count.
+          counts=$(grep -v '^[[:space:]]*$' "$RUNNER_TEMP/pytest.txt" | tail -n 1)
+          echo "::notice title=pytest::${counts:-no output}"
+
       - name: Surface the failures
         if: failure()
         run: |
+          [ -f "$RUNNER_TEMP/pytest.txt" ] || exit 0
           grep -E '^(FAILED|ERROR) ' "$RUNNER_TEMP/pytest.txt" | head -40 |
-            while IFS= read -r line; do echo "::error::$line"; done
-          tail -n 3 "$RUNNER_TEMP/pytest.txt" |
             while IFS= read -r line; do echo "::error::$line"; done
