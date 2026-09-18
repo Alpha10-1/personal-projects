@@ -108,7 +108,20 @@ def sync(
     results = []
     for name in repos:
         try:
-            results.append(github.sync_repo(db, name, limit=limit))
+            result = github.sync_repo(db, name, limit=limit)
+            # Comments are mirrored in the same pass, after the activity, so
+            # a pull request's description is read from a payload that is
+            # already stored. A comment endpoint that fails does not lose the
+            # activity that already synced -- that is the part that feeds the
+            # deterministic rules.
+            try:
+                feedback = github.sync_feedback(db, name, limit=limit)
+                result["feedback_added"] = feedback["added"]
+                result["feedback_attributed"] = feedback["attributed"]
+            except RuntimeError:
+                result["feedback_added"] = 0
+                result["feedback_attributed"] = 0
+            results.append(result)
         except RuntimeError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
     return results

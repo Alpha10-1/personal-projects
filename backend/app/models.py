@@ -223,6 +223,12 @@ class ActivityEvent(Base):
     # guess is never mistaken for something the user stated.
     linked_by = Column(String(20), nullable=True)
 
+    # Resolved from `actor` when a person with that github_login exists. Stored
+    # rather than joined at read time so the attribution survives someone
+    # renaming their GitHub account, and re-resolved by /people/relink when a
+    # person is added after their work was already ingested.
+    person_id = Column(Integer, ForeignKey("people.id"), nullable=True, index=True)
+
     created_at = Column(DateTime, default=utcnow)
 
 
@@ -283,4 +289,100 @@ class Attachment(Base):
     size_bytes = Column(Integer, nullable=False, default=0)
     note = Column(Text, nullable=True)
 
+    created_at = Column(DateTime, default=utcnow)
+
+
+# --- People -----------------------------------------------------------------
+
+# What a person is on a project. A viewer is shown progress; a contributor is
+# expected to appear in the git history. The distinction is about what you
+# expect from them, not about permissions -- there is no login to permit.
+MEMBER_ROLES = ("viewer", "contributor")
+
+
+class Person(Base):
+    """Someone involved in the work who is not you.
+
+    `github_login` is the join back to the git history: it is what turns an
+    `actor` string on an activity event into a named person. Without it a
+    person can still be a viewer and receive digests, they just have no
+    contributions, which is the honest result rather than an empty guess.
+    """
+
+    __tablename__ = "people"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(255), nullable=False)
+    email = Column(String(255), nullable=True)
+
+    # One login belongs to one person. Null is allowed and common -- a
+    # stakeholder who only ever reads a digest has no GitHub account here.
+    github_login = Column(String(100), nullable=True, unique=True, index=True)
+
+    # "Data engineering lead" -- their role in the organisation, not in this app.
+    role_title = Column(String(255), nullable=True)
+    notes = Column(Text, nullable=True)
+
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+    archived_at = Column(DateTime, nullable=True, index=True)
+
+
+class ProjectMember(Base):
+    """A person linked to a project, and in what capacity."""
+
+    __tablename__ = "project_members"
+
+    id = Column(Integer, primary_key=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
+    person_id = Column(Integer, ForeignKey("people.id"), nullable=False, index=True)
+
+    role = Column(String(20), nullable=False, default="viewer", index=True)
+    added_at = Column(DateTime, default=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("project_id", "person_id", name="uq_member_project_person"),
+    )
+
+
+# Where a piece of feedback came from. All but `manual` are read out of git,
+# which is the point: a suggestion made in a pull request is already recorded
+# somewhere durable, and this only mirrors it.
+FEEDBACK_SOURCES = ("pr_review", "pr_body", "issue_comment", "manual")
+FEEDBACK_STATUSES = ("open", "actioned", "declined")
+
+
+class Feedback(Base):
+    """Something a person said should happen.
+
+    Deliberately not the same table as `Suggestion`. A Suggestion is a
+    machine-proposed change to one field, with a fingerprint so it can be
+    applied or suppressed. This is prose from a human -- there is no field to
+    set and no rule that produced it, and flattening the two would mean
+    either losing the words or pretending a sentence is a field change.
+
+    `author_login` is kept even when no person matches, so feedback from
+    someone you have not added yet is recorded rather than dropped. Adding
+    that person later attaches it.
+    """
+
+    __tablename__ = "feedback"
+
+    id = Column(Integer, primary_key=True)
+
+    person_id = Column(Integer, ForeignKey("people.id"), nullable=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+
+    source = Column(String(20), nullable=False, index=True)
+    # GitHub's own id for the comment, so syncing twice does not duplicate.
+    # Null for anything entered by hand.
+    external_id = Column(String(255), nullable=True, unique=True)
+
+    author_login = Column(String(100), nullable=True, index=True)
+    body = Column(Text, nullable=False)
+    url = Column(Text, nullable=True)
+    occurred_at = Column(DateTime, nullable=False, index=True)
+
+    status = Column(String(20), nullable=False, default="open", index=True)
+    resolved_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=utcnow)

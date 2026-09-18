@@ -20,10 +20,10 @@ from datetime import datetime
 from typing import Any, Optional
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app import models
+from app import collaboration, models
 
 API_ROOT = "https://api.github.com"
 TIMEOUT = httpx.Timeout(30.0)
@@ -246,10 +246,15 @@ def sync_repo(
         if links["linked_by"] == "convention":
             linked_to_task += 1
 
+        # Named at ingest, the same way the project link is. An actor nobody
+        # owns stays null and is picked up later by /people/relink.
+        person = collaboration.person_for_login(db, fields.get("actor"))
+
         db.add(
             models.ActivityEvent(
                 provider="github",
                 raw=json.dumps(item["payload"])[:20000],
+                person_id=person.id if person else None,
                 **fields,
                 **links,
             )
@@ -327,3 +332,152 @@ def fetch_diffs(
             used += len(text)
 
     return "\n\n".join(chunks)
+
+
+# --- Feedback from people ---------------------------------------------------
+
+# A review comment is often a sentence fragment ("nit: spacing"). Below this
+# there is nothing worth recording as a suggestion.
+MIN_FEEDBACK_CHARS = 12
+
+
+def fetch_comments(repo: str, since: Optional[datetime], limit: int) -> list[dict]:
+    """Review comments and issue comments for a repo, newest first.
+
+    Two endpoints, both repo-wide rather than per pull request, so this is two
+    calls regardless of how much has happened. GitHub treats a pull request as
+    an issue, so `issues/comments` also covers discussion on PRs that isn't
+    attached to a line of code.
+    """
+    out: list[dict] = []
+    params: dict[str, Any] = {"per_page": min(limit, 100), "sort": "created",
+                              "direction": "desc"}
+    if since:
+        params["since"] = since.isoformat() + "Z"
+
+    with httpx.Client(base_url=API_ROOT, headers=_headers(), timeout=TIMEOUT) as client:
+        for path, kind in (
+            (f"/repos/{repo}/pulls/comments", "pr_review"),
+            (f"/repos/{repo}/issues/comments", "issue_comment"),
+        ):
+            response = client.get(path, params=params)
+            _raise_for_github(response, repo)
+            for item in response.json():
+                out.append({"kind": kind, "payload": item})
+    return out
+
+
+def _feedback_from_comment(kind: str, payload: dict) -> Optional[dict]:
+    body = (payload.get("body") or "").strip()
+    if len(body) < MIN_FEEDBACK_CHARS:
+        return None
+    return {
+        "source": kind,
+        "external_id": f"{kind}:{payload.get('id')}",
+        "author_login": (payload.get("user") or {}).get("login"),
+        "body": body[:8000],
+        "url": payload.get("html_url"),
+        "occurred_at": _parse_time(payload.get("created_at")),
+    }
+
+
+def _feedback_from_pull_body(event: models.ActivityEvent) -> Optional[dict]:
+    """A pull request's own description, read out of the payload already
+    stored -- so this source costs no extra request."""
+    try:
+        payload = json.loads(event.raw or "{}")
+    except ValueError:
+        return None
+    body = (payload.get("body") or "").strip()
+    if len(body) < MIN_FEEDBACK_CHARS:
+        return None
+    return {
+        "source": "pr_body",
+        "external_id": f"pr_body:{payload.get('id')}",
+        "author_login": (payload.get("user") or {}).get("login"),
+        "body": body[:8000],
+        "url": payload.get("html_url"),
+        "occurred_at": event.occurred_at,
+    }
+
+
+def sync_feedback(
+    db: Session,
+    repo: str,
+    *,
+    limit: int = 100,
+    fetcher: Optional[Callable[[str, Optional[datetime], int], Iterable[dict]]] = None,
+) -> dict:
+    """Mirror what people said in the repo into `feedback`.
+
+    Three sources, one of which is free: pull request descriptions come from
+    payloads `sync_repo` already stored, so only the two comment endpoints are
+    fetched.
+
+    Idempotent on `external_id`, which is prefixed by source -- GitHub's
+    comment ids are only unique within their own endpoint, and a review
+    comment and an issue comment can collide on the bare number.
+    """
+    fetch = fetcher or fetch_comments
+
+    known = set(
+        db.execute(
+            select(models.Feedback.external_id).where(
+                models.Feedback.external_id.is_not(None)
+            )
+        ).scalars()
+    )
+
+    candidates: list[dict] = []
+
+    for event in db.execute(
+        select(models.ActivityEvent).where(
+            models.ActivityEvent.repo == repo,
+            models.ActivityEvent.kind == "pull_request",
+        )
+    ).scalars():
+        fields = _feedback_from_pull_body(event)
+        if fields:
+            candidates.append(fields)
+
+    latest = db.execute(
+        select(func.max(models.Feedback.occurred_at)).where(
+            models.Feedback.source.in_(("pr_review", "issue_comment"))
+        )
+    ).scalar()
+    fetched = list(fetch(repo, latest, limit))
+    for item in fetched:
+        fields = _feedback_from_comment(item["kind"], item["payload"])
+        if fields:
+            candidates.append(fields)
+
+    added = 0
+    attributed = 0
+    for fields in candidates:
+        if not fields["external_id"] or fields["external_id"] in known:
+            continue
+        known.add(fields["external_id"])
+
+        person = collaboration.person_for_login(db, fields["author_login"])
+        if person:
+            attributed += 1
+
+        db.add(
+            models.Feedback(
+                person_id=person.id if person else None,
+                # Only the project, not the task: feedback is prose about the
+                # work, and `link` would be guessing at a task from it.
+                project_id=link(db, repo, fields["body"])["project_id"],
+                **fields,
+            )
+        )
+        added += 1
+
+    db.commit()
+    return {
+        "repo": repo,
+        "fetched": len(fetched),
+        "added": added,
+        "attributed": attributed,
+        "skipped": len(candidates) - added,
+    }

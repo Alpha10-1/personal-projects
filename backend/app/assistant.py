@@ -5,11 +5,16 @@ decides what leaves the machine, and it builds that from explicit queries so
 the answer to "what did it send?" is readable here rather than inferred from
 a prompt string.
 
-The assistant **reads**. It does not write to the tracker. That is the same
-line `review.py` draws: a suggestion is a proposal until a person accepts it,
-and the numbers stay trustworthy only while generated content can't quietly
-become record. The chat can tell you a task looks stalled; marking it stalled
-is still a click you make.
+The assistant reads, and writes in exactly one direction: it may **add** a
+note, stamped as agent-written, and it may **propose** a change. It may never
+overwrite something you wrote.
+
+That line matters more than it looks. The digest often has a better sentence
+than the project summary you typed six weeks ago -- and replacing it would
+mean that, over time, nobody could tell which words in the tracker were
+anyone's. So a note (additive, attributed, harmless) lands on its own, and a
+summary rewrite becomes a suggestion on the Review page with the old text
+kept beside the new one.
 """
 
 import json
@@ -359,6 +364,197 @@ async def review_repo(*, repo: str, events: list, diffs: str) -> dict:
         prompt=ai.clip("\n".join(lines), ai.MAX_CONTEXT_CHARS * 3),
         schema=REPO_SCHEMA,
         tool_name="review_repo",
+        model=ai.CHAT_MODEL,
+        max_tokens=ai.MAX_REVIEW_TOKENS,
+    )
+
+
+# --- Project digest ---------------------------------------------------------
+
+# A project summary is "one or two lines" in the form, and the column it lands
+# in is 255 characters. Asking for something that fits is better than
+# truncating a good sentence afterwards.
+SUMMARY_LIMIT = 240
+
+DIGEST_SYSTEM = (
+    "You write a short progress update on one project, for the people "
+    "working on it and the people who asked for it.\n\n"
+    "Rules:\n"
+    "- Say what moved and what did not. A digest that reads as though "
+    "everything is fine when two tasks are overdue is worse than none.\n"
+    "- Credit contributions to the person who made them, by name, from the "
+    "activity you are given. Do not credit work to someone whose name is not "
+    "in that list.\n"
+    "- The audience includes people outside the work, so no unexplained "
+    "internal shorthand.\n"
+    "- Plain and specific. No 'we are excited to', no 'significant "
+    "progress', no filler.\n"
+    "- Judge only from what you are given. Silence in the data means you "
+    "don't know, not that nothing happened."
+)
+
+DIGEST_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "note": {
+            "type": "string",
+            "description": (
+                "The progress update itself, 2-5 short paragraphs. This is "
+                "what gets stored and shared."
+            ),
+        },
+        "summary": {
+            "type": "string",
+            "description": (
+                "A replacement one-or-two-sentence project summary, at most "
+                f"{SUMMARY_LIMIT} characters. Omit unless the current one is "
+                "now actually wrong or out of date."
+            ),
+        },
+        "contributions": {
+            "type": "array",
+            "description": "One entry per person who did something, from the activity given.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "who": {"type": "string"},
+                    "what": {"type": "string"},
+                },
+                "required": ["who", "what"],
+            },
+            "maxItems": 12,
+        },
+        "risks": {
+            "type": "array",
+            "description": "What is slipping or at risk, from the data.",
+            "items": {"type": "string"},
+            "maxItems": 6,
+        },
+        "open_questions": {
+            "type": "array",
+            "description": "Decisions waiting on someone, including unanswered feedback.",
+            "items": {"type": "string"},
+            "maxItems": 6,
+        },
+    },
+    "required": ["note"],
+}
+
+
+def digest_context(db: Session, project: models.Project) -> str:
+    """Everything the digest is written from, as text.
+
+    Contributions are named here rather than left as GitHub logins: the
+    digest is for people, and "arendse committed" reads as a machine's
+    summary of a person.
+    """
+    lines = [
+        f"PROJECT #{project.id}: {project.name}",
+        f"status {project.status} / {project.category} / priority {project.priority}",
+    ]
+    if project.summary:
+        lines.append(f"current summary: {ai.clip(project.summary, 500)}")
+    if project.objective:
+        lines.append(f"objective: {ai.clip(project.objective, 500)}")
+    if project.definition_of_done:
+        lines.append(f"definition of done: {ai.clip(project.definition_of_done, 500)}")
+    if project.target_date:
+        lines.append(
+            f"target date: {project.target_date.isoformat()} "
+            f"(today is {date.today().isoformat()})"
+        )
+    if project.repo:
+        lines.append(f"repo: {project.repo}")
+
+    members = db.execute(
+        select(models.ProjectMember, models.Person)
+        .join(models.Person, models.Person.id == models.ProjectMember.person_id)
+        .where(models.ProjectMember.project_id == project.id)
+    ).all()
+    if members:
+        lines.append("\nPEOPLE ON THIS PROJECT")
+        for member, person in members:
+            bits = [f"  {person.name} ({member.role}"]
+            if person.role_title:
+                bits.append(f", {person.role_title}")
+            bits.append(")")
+            lines.append("".join(bits))
+
+    tasks = list(
+        db.execute(
+            select(models.Task).where(models.Task.project_id == project.id)
+        ).scalars()
+    )
+    if tasks:
+        done = [t for t in tasks if t.status == "done"]
+        lines.append(f"\nTASKS ({len(done)} of {len(tasks)} done)")
+        for task in tasks:
+            bits = [f"  #{task.id} {task.title} [{task.status}]"]
+            if task.due_date:
+                bits.append(f"due {task.due_date.isoformat()}")
+            if task.blocked_reason:
+                bits.append(f"blocked: {ai.clip(task.blocked_reason, 150)}")
+            lines.append(", ".join(bits))
+
+    milestones = list(
+        db.execute(
+            select(models.Milestone)
+            .where(models.Milestone.project_id == project.id)
+            .order_by(models.Milestone.position)
+        ).scalars()
+    )
+    if milestones:
+        lines.append("\nMILESTONES")
+        for milestone in milestones:
+            due = f" due {milestone.due_date.isoformat()}" if milestone.due_date else ""
+            lines.append(f"  {milestone.title} [{milestone.status}]{due}")
+
+    events = list(
+        db.execute(
+            select(models.ActivityEvent)
+            .where(models.ActivityEvent.project_id == project.id)
+            .order_by(models.ActivityEvent.occurred_at.desc())
+            .limit(40)
+        ).scalars()
+    )
+    if events:
+        names = {
+            p.id: p.name for p in db.execute(select(models.Person)).scalars()
+        }
+        lines.append("\nRECENT ACTIVITY (who did what)")
+        for event in events:
+            who = names.get(event.person_id) or event.actor or "unknown"
+            lines.append(
+                f"  {event.occurred_at:%Y-%m-%d} {who}: [{event.kind}] "
+                f"{ai.clip(event.title, 160)}"
+            )
+
+    feedback = list(
+        db.execute(
+            select(models.Feedback)
+            .where(models.Feedback.project_id == project.id)
+            .order_by(models.Feedback.occurred_at.desc())
+            .limit(20)
+        ).scalars()
+    )
+    if feedback:
+        names = {p.id: p.name for p in db.execute(select(models.Person)).scalars()}
+        lines.append("\nFEEDBACK FROM PEOPLE")
+        for item in feedback:
+            who = names.get(item.person_id) or item.author_login or "unknown"
+            lines.append(
+                f"  [{item.status}] {who} ({item.source}): {ai.clip(item.body, 400)}"
+            )
+
+    return ai.clip("\n".join(lines), ai.MAX_CONTEXT_CHARS * 2)
+
+
+async def write_digest(db: Session, project: models.Project) -> dict:
+    return await ai.structured(
+        system=DIGEST_SYSTEM,
+        prompt=digest_context(db, project),
+        schema=DIGEST_SCHEMA,
+        tool_name="write_digest",
         model=ai.CHAT_MODEL,
         max_tokens=ai.MAX_REVIEW_TOKENS,
     )

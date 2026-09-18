@@ -18,6 +18,7 @@ from app.routes import (
     dashboard,
     library,
     milestones,
+    people,
     projects,
     review,
     tasks,
@@ -61,4 +62,5 @@ app.include_router(library.router)
 app.include_router(dashboard.router)
 app.include_router(activity.router)
 app.include_router(review.router)
+app.include_router(people.router)
 app.include_router(ai.router)

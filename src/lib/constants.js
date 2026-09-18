@@ -93,3 +93,25 @@ export const PRIORITY_TONE = {
   medium: "neutral",
   low: "neutral",
 };
+
+// What a person is on a project. Not permissions -- there is no login to
+// permit -- but what you expect from them.
+export const MEMBER_ROLES = [
+  { value: "viewer", label: "Viewer" },
+  { value: "contributor", label: "Contributor" },
+];
+
+export const FEEDBACK_STATUSES = [
+  { value: "open", label: "Open" },
+  { value: "actioned", label: "Actioned" },
+  { value: "declined", label: "Declined" },
+];
+
+// Where a piece of feedback came from. Everything but `manual` is mirrored
+// out of GitHub, which is why those rows can't be edited away.
+export const FEEDBACK_SOURCES = [
+  { value: "pr_review", label: "PR review" },
+  { value: "pr_body", label: "PR description" },
+  { value: "issue_comment", label: "Issue comment" },
+  { value: "manual", label: "Noted by you" },
+];

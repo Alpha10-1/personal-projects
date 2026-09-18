@@ -325,6 +325,11 @@ class SyncResult(BaseModel):
     linked_to_task: int
     since: Optional[str] = None
 
+    # Feedback is mirrored in the same pass. Defaulted so a caller that only
+    # syncs activity still validates.
+    feedback_added: int = 0
+    feedback_attributed: int = 0
+
 
 class FindingOut(BaseModel):
     rule: str
@@ -368,3 +373,103 @@ class AttachmentOut(ORMModel):
     note: Optional[str]
     created_at: Optional[datetime]
     project_name: Optional[str] = None
+
+
+# --- People -----------------------------------------------------------------
+
+MemberRole = Literal["viewer", "contributor"]
+FeedbackSource = Literal["pr_review", "pr_body", "issue_comment", "manual"]
+FeedbackStatus = Literal["open", "actioned", "declined"]
+
+
+class PersonCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    email: Optional[str] = Field(default=None, max_length=255)
+    github_login: Optional[str] = Field(default=None, max_length=100)
+    role_title: Optional[str] = Field(default=None, max_length=255)
+    notes: Optional[str] = None
+
+
+class PersonUpdate(BaseModel):
+    name: Annotated[Optional[str], NoNull] = Field(default=None, min_length=1, max_length=255)
+    email: Optional[str] = Field(default=None, max_length=255)
+    github_login: Optional[str] = Field(default=None, max_length=100)
+    role_title: Optional[str] = Field(default=None, max_length=255)
+    notes: Optional[str] = None
+
+
+class PersonOut(ORMModel):
+    id: int
+    name: str
+    email: Optional[str]
+    github_login: Optional[str]
+    role_title: Optional[str]
+    notes: Optional[str]
+    created_at: datetime
+    archived_at: Optional[datetime]
+
+    # Derived, so a list of people is useful without a request per row.
+    project_count: int = 0
+    contribution_count: int = 0
+    feedback_open: int = 0
+    last_contribution_at: Optional[datetime] = None
+
+
+class MemberCreate(BaseModel):
+    person_id: int
+    role: MemberRole = "viewer"
+
+
+class MemberUpdate(BaseModel):
+    role: Annotated[Optional[MemberRole], NoNull] = None
+
+
+class MemberOut(BaseModel):
+    """A person on a project, flattened -- the membership id is what you need
+    to change or remove the link, and the person's details are what you need
+    to show it."""
+
+    id: int
+    person_id: int
+    project_id: int
+    role: MemberRole
+    added_at: datetime
+
+    name: str
+    email: Optional[str]
+    github_login: Optional[str]
+    role_title: Optional[str]
+
+    contribution_count: int = 0
+    feedback_open: int = 0
+    last_contribution_at: Optional[datetime] = None
+
+
+class FeedbackCreate(BaseModel):
+    body: str = Field(min_length=1)
+    person_id: Optional[int] = None
+    project_id: Optional[int] = None
+    url: Optional[str] = None
+    occurred_at: Optional[datetime] = None
+
+
+class FeedbackUpdate(BaseModel):
+    body: Annotated[Optional[str], NoNull] = Field(default=None, min_length=1)
+    status: Annotated[Optional[FeedbackStatus], NoNull] = None
+    person_id: Optional[int] = None
+    project_id: Optional[int] = None
+
+
+class FeedbackOut(ORMModel):
+    id: int
+    person_id: Optional[int]
+    project_id: Optional[int]
+    source: FeedbackSource
+    author_login: Optional[str]
+    body: str
+    url: Optional[str]
+    occurred_at: datetime
+    status: FeedbackStatus
+    resolved_at: Optional[datetime]
+
+    person_name: Optional[str] = None

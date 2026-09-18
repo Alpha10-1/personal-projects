@@ -232,6 +232,109 @@ what turns on activity ingestion, the two suggestion rules, and the Repo tab.
 
 ---
 
+## People and collaboration
+
+Other people can be linked to a project, either to be kept informed or
+because they are doing some of the work. **There is still no login.** A
+person here is a record of someone involved, not an account — which is the
+honest shape of a single-user app, and it means adding collaborators changed
+nothing about how the API is secured.
+
+So collaboration is tracked, not hosted:
+
+| | |
+|---|---|
+| **What they did** | Read out of git. `Person.github_login` matched against the `actor` on each commit and pull request. |
+| **What they suggested** | Mirrored from pull request reviews, pull request descriptions and issue comments — plus anything you note by hand. |
+| **What they see** | A read-only progress snapshot you send them. |
+
+The **People** page lists everyone with their contribution counts, and each
+project has a **Team** tab.
+
+### Naming a contributor
+
+`github_login` is the whole join. Set it and their existing history attaches
+immediately — adding someone who has been committing for weeks shows those
+weeks rather than starting from zero:
+
+```bash
+curl -X POST localhost:8000/people   -H 'Content-Type: application/json'   -d '{"name": "Thabo Arendse", "github_login": "tarendse", "role_title": "Data engineering lead"}'
+
+curl localhost:8000/people/unlinked      # committing here, but nobody on record
+curl -X POST localhost:8000/people/relink
+```
+
+Attribution is *stored* on the event, not computed on read, so someone
+renaming their GitHub account doesn't silently reassign three months of
+history. `relink` re-derives it from the logins currently on record, and only
+ever from those — it cannot invent an attribution.
+
+**Removing a person keeps what they did.** The commits happened and the words
+were said; `author_login` still records who. Only the link to a name goes —
+the same bargain as deleting a task and keeping its time logs.
+
+### Suggestions from people
+
+Four sources. Three are mirrored out of GitHub on every `/activity/sync`, so
+a suggestion made in a pull request is recorded somewhere durable and this
+only reflects it:
+
+| Source | Where it comes from |
+|---|---|
+| `pr_review` | Review comments on a pull request |
+| `pr_body` | A pull request's own description — read from a payload already stored, so it costs no extra request |
+| `issue_comment` | Discussion on issues and pull requests |
+| `manual` | Something said in a meeting, entered by you |
+
+These live in `feedback`, deliberately **not** in the `suggestions` table. A
+suggestion is a machine-proposed change to one field with a fingerprint so it
+can be applied or suppressed; this is prose from a human. Flattening the two
+would mean either losing the words or pretending a sentence is a field change.
+
+A git-sourced row can't be deleted — it would return on the next sync. Mark
+it declined instead.
+
+### Sharing progress
+
+```bash
+curl localhost:8000/projects/1/share > progress.html
+```
+
+One self-contained HTML file: inline styles, no scripts, no external
+requests. It has to survive being attached to an email and opened on a
+machine that has never heard of this app, and it must not phone home from
+someone else's laptop.
+
+**What it leaves out is the point:**
+
+```
+included   name, summary, objective, definition of done, status, dates,
+           progress, milestones, task titles and states, who contributed,
+           open feedback, and the latest digest
+excluded   retro / lessons learned, hours and time logs, the stakeholder
+           field, and every note except a digest
+```
+
+Those exclusions are the fields where you say what you actually think. A
+sharing feature that needed proofreading before every send would not get used.
+
+### The progress update
+
+```bash
+curl -X POST localhost:8000/ai/projects/1/digest
+```
+
+Writes a progress note crediting contributions by name, from the git history.
+The note is written straight away — it is additive and stamped `agent`.
+
+A better project **summary** is only ever *proposed*. It lands on the Review
+page as a suggestion with your current wording beside it. The digest often
+does have a sharper sentence than the one you typed six weeks ago, and
+replacing it would mean that over time nobody could tell which words in the
+tracker were anyone's.
+
+---
+
 ## Using it from Claude (MCP)
 
 `backend/mcp_server.py` exposes the tracker as an MCP server, so Claude Code
@@ -355,6 +458,8 @@ backend/
     enrich.py      derived counts, hours and progress
     github.py      fetching, translating and linking activity
     review.py      the deterministic rules: findings and suggestions
+    collaboration.py  turning git history into named people
+    share.py       the read-only snapshot you send someone
     ai.py          the model client -- the only thing that leaves the machine
     assistant.py   what the model is told, and what it is asked for
     routes/        projects, milestones, tasks, time_logs, library, dashboard, ai

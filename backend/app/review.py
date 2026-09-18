@@ -320,6 +320,17 @@ def apply(db: Session, suggestion: models.Suggestion) -> None:
     directly, so an accepted suggestion has exactly the same side effects as
     the same change made by hand.
     """
+    if suggestion.target_type == "project" and suggestion.field == "summary":
+        project = db.get(models.Project, suggestion.target_id)
+        if project is None:
+            raise LookupError(f"Project {suggestion.target_id} no longer exists")
+        # Routed through a suggestion rather than written by the digest that
+        # produced it: a summary is prose you wrote, and overwriting it
+        # because a model had a better phrasing is the one thing this system
+        # is built not to do.
+        project.summary = suggestion.proposed_value
+        return
+
     if suggestion.target_type != "task" or suggestion.field != "status":
         raise ValueError(
             f"Don't know how to apply {suggestion.target_type}.{suggestion.field}"

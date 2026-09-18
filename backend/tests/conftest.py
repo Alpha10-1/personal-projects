@@ -87,6 +87,18 @@ class Factory:
     def milestone(self, project, title="Milestone", **kw):
         return self._add(models.Milestone(project_id=project.id, title=title, **kw))
 
+    def person(self, name="Person", **kw):
+        return self._add(models.Person(name=name, **kw))
+
+    def event(self, repo="owner/name", external_id="e1", kind="commit", **kw):
+        kw.setdefault("title", "a commit")
+        kw.setdefault("occurred_at", models.utcnow())
+        return self._add(
+            models.ActivityEvent(
+                provider="github", external_id=external_id, kind=kind, repo=repo, **kw
+            )
+        )
+
     def log(self, work_date=None, hours=1.0, **kw):
         return self._add(
             models.TimeLog(
@@ -120,6 +132,12 @@ def no_outbound_http(monkeypatch, request):
             "mark the test with @pytest.mark.network."
         )
 
+    def refuse_comments(repo, since, limit):
+        raise AssertionError(
+            f"Test tried to fetch comments for {repo} from GitHub. Inject a "
+            "fetcher, or mark the test with @pytest.mark.network."
+        )
+
     def refuse_diffs(repo, shas, **kw):
         raise AssertionError(
             f"Test tried to fetch diffs for {repo} from GitHub. Patch "
@@ -135,6 +153,7 @@ def no_outbound_http(monkeypatch, request):
     from app import ai, github
 
     monkeypatch.setattr(github, "fetch_from_github", refuse)
+    monkeypatch.setattr(github, "fetch_comments", refuse_comments)
     monkeypatch.setattr(github, "fetch_diffs", refuse_diffs)
     # The model is guarded at the client rather than at structured()/stream(),
     # so a test that patches neither is caught instead of quietly billing.

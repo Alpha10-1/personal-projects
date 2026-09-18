@@ -171,6 +171,10 @@ def delete_project(project_id: int, db: Session = Depends(get_db)):
     for model in (
         # ActivityEvent references both tasks and projects, so it goes first.
         models.ActivityEvent,
+        # Membership and feedback are leaves -- nothing points at them -- but
+        # they point at the project, so they still have to go before it.
+        models.ProjectMember,
+        models.Feedback,
         models.TimeLog,
         models.Note,
         models.Link,

@@ -263,6 +263,8 @@ def test_activity_endpoint_lists_newest_first(client, db, make, monkeypatch):
         {"kind": "pull_request", "payload": pr_payload(number=1, title="newer")},
     ]
     monkeypatch.setattr(github, "fetch_from_github", fake_fetcher(items))
+    # The sync mirrors comments in the same pass; this test is about activity.
+    monkeypatch.setattr(github, "fetch_comments", lambda *_a: [])
 
     assert client.post("/activity/sync").status_code == 200
 
@@ -279,6 +281,8 @@ def test_activity_filters(client, db, make, monkeypatch):
         {"kind": "pull_request", "payload": pr_payload(number=2)},
     ]
     monkeypatch.setattr(github, "fetch_from_github", fake_fetcher(items))
+    # The sync mirrors comments in the same pass; this test is about activity.
+    monkeypatch.setattr(github, "fetch_comments", lambda *_a: [])
     client.post("/activity/sync")
 
     assert len(client.get("/activity", params={"kind": "commit"}).json()) == 1
