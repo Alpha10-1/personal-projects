@@ -148,6 +148,12 @@ def no_outbound_http(monkeypatch, request):
     # front of it stays real -- a guard on the wrapper would make the caching
     # itself untestable, which is the part that protects the quota.
 
+    def refuse_commit_stats(repo, shas):
+        raise AssertionError(
+            f"Test tried to fetch commit detail for {repo} from GitHub. Inject "
+            "a fetcher, or mark the test with @pytest.mark.network."
+        )
+
     def refuse_readme(repo, max_chars=8000):
         raise AssertionError(
             f"Test tried to fetch {repo}'s README from GitHub. Patch "
@@ -171,6 +177,7 @@ def no_outbound_http(monkeypatch, request):
     monkeypatch.setattr(github, "fetch_from_github", refuse)
     monkeypatch.setattr(github, "fetch_comments", refuse_comments)
     monkeypatch.setattr(github, "_fetch_user_repos_uncached", refuse_repos)
+    monkeypatch.setattr(github, "fetch_commit_stats", refuse_commit_stats)
     monkeypatch.setattr(github, "fetch_readme", refuse_readme)
     monkeypatch.setattr(github, "fetch_diffs", refuse_diffs)
     # The model is guarded at the client rather than at structured()/stream(),

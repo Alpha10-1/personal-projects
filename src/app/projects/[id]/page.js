@@ -41,6 +41,7 @@ import ProjectForm from "@/components/ProjectForm";
 import LibraryPanels from "@/components/LibraryPanels";
 import RepoInsights from "@/components/RepoInsights";
 import Dashboards from "@/components/Dashboards";
+import ProjectHistory from "@/components/ProjectHistory";
 import ProjectTeam from "@/components/ProjectTeam";
 import TimeLogPanel from "@/components/TimeLogPanel";
 
@@ -482,7 +483,12 @@ export default function ProjectDetailPage() {
 
       {tab === "team" ? <ProjectTeam project={p} /> : null}
 
-      {tab === "repo" ? <RepoInsights project={p} /> : null}
+      {tab === "repo" ? (
+        <div className="space-y-5">
+          <ProjectHistory project={p} />
+          <RepoInsights project={p} />
+        </div>
+      ) : null}
 
       {tab === "brief" ? (
         <Card className="space-y-4 p-4">

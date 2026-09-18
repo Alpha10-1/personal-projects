@@ -125,3 +125,38 @@ def sync(
         except RuntimeError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
     return results
+
+
+@router.post("/deep-sync")
+def deep_sync(
+    db: Session = Depends(get_db),
+    repo: Optional[str] = None,
+    limit: int = Query(github.DEEP_SYNC_DEFAULT, ge=1, le=300),
+):
+    """Fetch file-level detail for commits that don't have it yet.
+
+    The ordinary sync stores commit messages, because that is all the commit
+    *list* endpoint returns. Knowing which files a commit touched costs one
+    request per commit, so it is a separate, explicit pass.
+
+    Incremental: only commits missing their detail are fetched, newest first,
+    so running it repeatedly walks back through a long history a chunk at a
+    time. `still_missing` in the reply says whether there is more to get.
+    """
+    repos = [repo] if repo else github.tracked_repos(db)
+    if not repos:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "No repos to sync. Set a project's `repo` field, or pass "
+                "?repo=owner/name."
+            ),
+        )
+
+    results = []
+    for name in repos:
+        try:
+            results.append(github.deep_sync(db, name, limit=limit))
+        except RuntimeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return results

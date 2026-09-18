@@ -729,3 +729,110 @@ def resolve_account(db: Session, asked: Optional[str] = None) -> tuple[Optional[
     if from_projects:
         return from_projects, "a repo already mapped to a project"
     return None, "nothing to go on"
+
+
+# --- Full history, with file-level detail -----------------------------------
+
+# One request per commit, so a repo with thousands of them would be a long
+# afternoon. Deep syncs are incremental and capped; the cap is a per-call
+# ceiling, not a limit on how much can eventually be gathered.
+DEEP_SYNC_DEFAULT = 60
+
+
+def fetch_commit_stats(repo: str, shas: list[str]) -> dict[str, dict]:
+    """Which files each commit touched, and by how much.
+
+    Keyed by sha so the caller can attach results without assuming order.
+    A commit that cannot be read is skipped rather than failing the batch --
+    a history over 58 of 60 commits is still worth having.
+    """
+    out: dict[str, dict] = {}
+    with httpx.Client(base_url=API_ROOT, headers=_headers(), timeout=TIMEOUT) as client:
+        for sha in shas:
+            try:
+                response = client.get(f"/repos/{repo}/commits/{sha}")
+                _raise_for_github(response, repo)
+                payload = response.json()
+            except (httpx.HTTPError, RuntimeError, ValueError):
+                continue
+
+            files = []
+            for changed in payload.get("files") or []:
+                path = changed.get("filename")
+                if not path:
+                    continue
+                files.append(
+                    {
+                        "path": path,
+                        "status": changed.get("status"),
+                        "additions": changed.get("additions", 0),
+                        "deletions": changed.get("deletions", 0),
+                    }
+                )
+            stats = payload.get("stats") or {}
+            out[sha] = {
+                "files": files,
+                "additions": stats.get("additions", 0),
+                "deletions": stats.get("deletions", 0),
+            }
+    return out
+
+
+def deep_sync(
+    db: Session,
+    repo: str,
+    *,
+    limit: int = DEEP_SYNC_DEFAULT,
+    fetcher: Optional[Callable[[str, list[str]], dict]] = None,
+) -> dict:
+    """Fill in file-level detail for commits that do not have it yet.
+
+    Incremental by design: only commits with no `file_stats` are fetched, so
+    running it repeatedly walks backwards through the history a chunk at a
+    time instead of re-reading what is already known.
+    """
+    fetch = fetcher or fetch_commit_stats
+
+    pending = list(
+        db.execute(
+            select(models.ActivityEvent)
+            .where(
+                models.ActivityEvent.repo == repo,
+                models.ActivityEvent.kind == "commit",
+                models.ActivityEvent.file_stats.is_(None),
+            )
+            .order_by(models.ActivityEvent.occurred_at.desc())
+            .limit(limit)
+        ).scalars()
+    )
+
+    by_sha: dict[str, models.ActivityEvent] = {}
+    for event in pending:
+        try:
+            sha = json.loads(event.raw or "{}").get("sha")
+        except ValueError:
+            continue
+        if sha:
+            by_sha[sha] = event
+
+    stats = fetch(repo, list(by_sha)) if by_sha else {}
+    for sha, detail in stats.items():
+        event = by_sha.get(sha)
+        if event is not None:
+            event.file_stats = json.dumps(detail)[:40000]
+    db.commit()
+
+    remaining = db.execute(
+        select(func.count(models.ActivityEvent.id)).where(
+            models.ActivityEvent.repo == repo,
+            models.ActivityEvent.kind == "commit",
+            models.ActivityEvent.file_stats.is_(None),
+        )
+    ).scalar()
+
+    return {
+        "repo": repo,
+        "requested": len(by_sha),
+        "filled": len(stats),
+        "still_missing": remaining,
+    }

@@ -18,6 +18,7 @@ kept beside the new one.
 """
 
 import json
+import re
 from datetime import date
 from typing import Optional
 
@@ -211,6 +212,69 @@ TASK_DRAFT_SCHEMA = {
 }
 
 
+# A trailing run of quotes, brackets, braces and commas -- but only one that
+# contains at least one bracket, brace or comma, which is what makes it JSON
+# debris rather than punctuation someone meant.
+JSON_TAIL = re.compile(r"""["']*\s*[\]\},]+[\s"'\]\},]*$""")
+
+
+def clean_prose(text: Optional[str]) -> str:
+    """Strip the JSON punctuation a model occasionally leaves on the end of a
+    string field.
+
+    Structured output is overwhelmingly clean, but not always: a summary has
+    come back ending `..." ]`, which then reads as a typo in a note somebody
+    else opens.
+
+    The run is only removed when it actually contains JSON punctuation, so a
+    sentence that genuinely ends in a quotation mark keeps it -- stripping
+    every trailing quote would quietly damage real prose to tidy up a rare
+    artefact.
+    """
+    if not text:
+        return ""
+    cleaned = JSON_TAIL.sub("", str(text).strip()).strip()
+
+    # A lone trailing quote is the other form this takes. Whether it is debris
+    # or the end of a real quotation is decidable: a closing quote has an
+    # opening one, so an odd number of them means the last is unbalanced and
+    # was never meant to be there. `He said "hello"` has two and survives.
+    while cleaned.endswith('"') and cleaned.count('"') % 2 == 1:
+        cleaned = cleaned[:-1].strip()
+    return cleaned
+
+
+def fit(text: Optional[str], limit: int) -> str:
+    """Shorten to a limit without cutting mid-word.
+
+    A hard slice produces "...migrations and tests " -- which looks like the
+    system lost the end of the sentence, because it did. Prefer the last
+    sentence that fits; fall back to the last whole word with an ellipsis.
+    """
+    cleaned = clean_prose(text)
+    if len(cleaned) <= limit:
+        return cleaned
+
+    window = cleaned[:limit]
+
+    # A sentence end, if one leaves enough behind to be a summary. The floor is
+    # absolute rather than a fraction of the limit: a complete 117-character
+    # sentence is a better summary than 240 characters stopping mid-clause,
+    # and a fraction of a generous limit rejects it for no good reason.
+    # Capped by the floor, but never more than half the limit -- a short limit
+    # would otherwise reject every sentence it could actually have kept.
+    threshold = min(MIN_SUMMARY_KEEP, limit // 2)
+    for end in (". ", "! ", "? ", "; "):
+        cut = window.rfind(end)
+        if cut >= threshold:
+            return window[: cut + 1].strip()
+
+    # Otherwise the last whole word, marked as abbreviated. A comma is not a
+    # sentence end -- stopping at one reads as text that went missing.
+    cut = window.rfind(" ")
+    return (window[:cut] if cut > 0 else window).rstrip(" ,;:") + "…"
+
+
 def draft_text(draft: dict) -> str:
     """The part of a draft worth spending a call on.
 
@@ -375,6 +439,10 @@ async def review_repo(*, repo: str, events: list, diffs: str) -> dict:
 # in is 255 characters. Asking for something that fits is better than
 # truncating a good sentence afterwards.
 SUMMARY_LIMIT = 240
+
+# The shortest thing still worth calling a summary. Below this, a clean
+# sentence is not better than an abbreviated longer one.
+MIN_SUMMARY_KEEP = 60
 
 DIGEST_SYSTEM = (
     "You write a short progress update on one project, for the people "
@@ -761,3 +829,140 @@ async def harvest(topic: str, messages: list[dict]) -> dict:
         model=ai.CHAT_MODEL,
         max_tokens=ai.MAX_REVIEW_TOKENS,
     )
+
+
+# --- What a repository's history says ----------------------------------------
+
+HISTORY_SYSTEM = (
+    "You are describing a software project from its commit history, for "
+    "someone who has never seen it -- or for its author a year later, who has "
+    "forgotten.\n\n"
+    "You are given a computed timeline: commits per month, which parts of the "
+    "tree they touched, when each area first and last appeared, and the "
+    "most-changed files. Those numbers are facts. Your job is what they "
+    "mean.\n\n"
+    "Rules:\n"
+    "- Say what the project *is* first, in plain terms, from what the code "
+    "and commits show it does. Not 'a Python application' -- what it is for.\n"
+    "- Then how it changed: the phases it went through, what each one added, "
+    "and where the work concentrated. Name areas and files, because 'the "
+    "backend grew' is worth nothing next to 'app/core gained the search and "
+    "risk modules in August'.\n"
+    "- Dates and areas must come from the timeline. If you cannot see when "
+    "something happened, do not date it.\n"
+    "- Notice what the shape says: a month with no commits is a pause, an "
+    "area touched once and never again is abandoned or finished, a file "
+    "changed in half the commits is either central or unstable.\n"
+    "- Where detail is missing, say so rather than filling it in.\n"
+    "- No praise, no 'robust', no summarising your own summary at the end."
+)
+
+HISTORY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "what_it_is": {
+            "type": "string",
+            "description": (
+                "What the project is and does, in 2-4 sentences, for "
+                "someone who has never seen it."
+            ),
+        },
+        "phases": {
+            "type": "array",
+            "description": "The eras the history falls into, in order.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "period": {"type": "string", "description": "e.g. 'Apr-Jun 2026'"},
+                    "title": {"type": "string"},
+                    "what_changed": {
+                        "type": "string",
+                        "description": (
+                            "What was built or changed, naming areas and files."
+                        ),
+                    },
+                },
+                "required": ["period", "title", "what_changed"],
+            },
+            "maxItems": 8,
+        },
+        "where_the_work_went": {
+            "type": "array",
+            "description": (
+                "The parts of the tree that absorbed the effort, and what "
+                "each is for."
+            ),
+            "items": {
+                "type": "object",
+                "properties": {
+                    "area": {"type": "string"},
+                    "what_it_does": {"type": "string"},
+                    "activity": {
+                        "type": "string",
+                        "description": (
+                            "When it appeared, how heavily it was worked, "
+                            "whether it is still active."
+                        ),
+                    },
+                },
+                "required": ["area", "what_it_does"],
+            },
+            "maxItems": 8,
+        },
+        "observations": {
+            "type": "array",
+            "description": (
+                "What the shape of the history suggests. Pauses, abandoned "
+                "areas, churn."
+            ),
+            "items": {"type": "string"},
+            "maxItems": 6,
+        },
+        "suggested_summary": {
+            "type": "string",
+            "description": (
+                "A one-or-two-sentence project summary, at most 240 "
+                "characters, suitable for the tracker."
+            ),
+        },
+    },
+    "required": ["what_it_is"],
+}
+
+
+async def summarise_history(timeline_text: str) -> dict:
+    """What the project is, and how it got that way."""
+    return await ai.structured(
+        system=HISTORY_SYSTEM,
+        prompt=ai.clip(timeline_text, ai.MAX_CONTEXT_CHARS * 3),
+        schema=HISTORY_SCHEMA,
+        tool_name="summarise_history",
+        model=ai.CHAT_MODEL,
+        max_tokens=ai.MAX_REVIEW_TOKENS,
+    )
+
+
+# --- Questions about a repository --------------------------------------------
+
+ASK_SYSTEM = (
+    "You answer questions about a software project, from its commit history "
+    "and the file-level record of what each commit changed.\n\n"
+    "Everything you know is below. It is a computed timeline plus commit "
+    "subjects -- not the source code. You can say what was changed, where and "
+    "when; you cannot say how a function is implemented unless a commit "
+    "message says so.\n\n"
+    "Rules:\n"
+    "- Ground every claim. Cite the month, the area or the file it comes "
+    "from, so the answer can be checked.\n"
+    "- If the history does not answer the question, say exactly that, and say "
+    "what would -- reading the code, or a deeper sync for the commits whose "
+    "detail is missing.\n"
+    "- Never infer a feature exists because it would be normal for it to. If "
+    "no commit mentions authentication, you do not know that there is any.\n"
+    "- Short and direct. No preamble, no restating the question."
+)
+
+
+def ask_system(timeline_text: str) -> str:
+    history = ai.clip(timeline_text, ai.MAX_CONTEXT_CHARS * 3)
+    return f"{ASK_SYSTEM}\n\n--- THE HISTORY ---\n{history}"

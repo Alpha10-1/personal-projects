@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import ai, assistant, github, models
+from app import ai, assistant, github, history, models
 from app.db import get_db
 
 router = APIRouter(prefix="/ai", tags=["ai"])
@@ -228,7 +228,7 @@ async def project_digest(project_id: int, db: Session = Depends(get_db)):
     except ai.AIFailed as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    body_parts = [result["note"]]
+    body_parts = [assistant.clean_prose(result["note"])]
     if result.get("contributions"):
         body_parts.append(
             "\nContributions\n"
@@ -253,7 +253,7 @@ async def project_digest(project_id: int, db: Session = Depends(get_db)):
     )
     db.add(note)
 
-    proposed = (result.get("summary") or "").strip()[: assistant.SUMMARY_LIMIT]
+    proposed = assistant.fit(result.get("summary"), assistant.SUMMARY_LIMIT)
     summary_suggested = False
     if proposed and proposed != (project.summary or "").strip():
         # One pending summary suggestion per project at a time: the
@@ -589,3 +589,191 @@ async def brainstorm_harvest(
         db.commit()
 
     return {**result, "applied": request.apply, "tasks_created": created, "project_id": target}
+
+
+# --- What a repository's history says -----------------------------------------
+
+
+def _project_with_history(db: Session, project_id: int) -> models.Project:
+    project = db.get(models.Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if not project.repo:
+        raise HTTPException(
+            status_code=400, detail="This project isn't linked to a repo yet."
+        )
+    return project
+
+
+@router.get("/projects/{project_id}/timeline")
+def project_timeline(project_id: int, db: Session = Depends(get_db)):
+    """The computed history: periods, areas, files, contributors.
+
+    No model, no key needed, and no cost. This is the arithmetic the summary
+    and the questions are both built on, exposed on its own so an answer can
+    be checked against it.
+    """
+    project = _project_with_history(db, project_id)
+    data = history.timeline(db, project)
+    if not data["commits"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No commits recorded for {project.repo} yet. Sync it first.",
+        )
+    start, end = data["span"]
+    return {**data, "span": {"first": start, "last": end}, "repo": project.repo}
+
+
+@router.post("/projects/{project_id}/history")
+async def project_history(project_id: int, db: Session = Depends(get_db)):
+    """What this project is, and how it changed over its whole history.
+
+    Different question from the repo review, which reads the most recent
+    commits looking for bugs. This reads the shape of the entire history --
+    what was built when, where the work concentrated, what was abandoned --
+    and writes it into the tracker as a note.
+
+    As with the digest, the note is written but a better project *summary* is
+    only ever proposed.
+    """
+    _require_ai()
+    project = _project_with_history(db, project_id)
+
+    data = history.timeline(db, project)
+    if not data["commits"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No commits recorded for {project.repo} yet. Sync it first.",
+        )
+
+    try:
+        result = await assistant.summarise_history(history.as_text(data, project))
+    except ai.AINotConfigured as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ai.AIFailed as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    body = [assistant.clean_prose(result["what_it_is"])]
+    if result.get("phases"):
+        body.append("\nHow it developed")
+        for phase in result["phases"]:
+            body.append(f"\n{phase['period']} — {phase['title']}")
+            body.append(f"  {phase['what_changed']}")
+    if result.get("where_the_work_went"):
+        body.append("\nWhere the work went")
+        for area in result["where_the_work_went"]:
+            line = f"- {area['area']}: {assistant.clean_prose(area['what_it_does'])}"
+            if area.get("activity"):
+                line += f" ({assistant.clean_prose(area['activity'])})"
+            body.append(line)
+    if result.get("observations"):
+        body.append("\nWorth noticing")
+        body.extend(f"- {assistant.clean_prose(o)}" for o in result["observations"])
+
+    start, end = data["span"]
+    body.append(
+        f"\nFrom {data['commits']} commits between {start:%d %b %Y} and "
+        f"{end:%d %b %Y}"
+        + (
+            f"; file-level detail for {data['detailed']} of them."
+            if data["detailed"] < data["commits"]
+            else " with full file-level detail."
+        )
+    )
+
+    note = models.Note(
+        project_id=project.id,
+        title=f"Project history {date.today().isoformat()}",
+        body="\n".join(body),
+        kind="note",
+        source="agent",
+    )
+    db.add(note)
+
+    proposed = assistant.fit(result.get("suggested_summary"), assistant.SUMMARY_LIMIT)
+    summary_suggested = False
+    if proposed and proposed != (project.summary or "").strip():
+        fingerprint = f"history_summary:project:{project.id}"
+        existing = db.execute(
+            select(models.Suggestion).where(models.Suggestion.fingerprint == fingerprint)
+        ).scalar_one_or_none()
+        if existing is None or existing.status == "pending":
+            if existing is not None:
+                db.delete(existing)
+                db.flush()
+            db.add(
+                models.Suggestion(
+                    rule="history_summary",
+                    fingerprint=fingerprint,
+                    target_type="project",
+                    target_id=project.id,
+                    field="summary",
+                    current_value=(project.summary or "")[:255],
+                    proposed_value=proposed,
+                    rationale="Read from the repository's whole commit history.",
+                    evidence=json.dumps(
+                        [f"{data['commits']} commits, {start:%b %Y} to {end:%b %Y}"]
+                    ),
+                )
+            )
+            summary_suggested = True
+
+    db.commit()
+    db.refresh(note)
+
+    return {
+        "project_id": project.id,
+        "repo": project.repo,
+        "commits": data["commits"],
+        "detailed": data["detailed"],
+        "note_id": note.id,
+        "note": note.body,
+        **result,
+        "summary_suggested": summary_suggested,
+    }
+
+
+class AskRequest(BaseModel):
+    question: str = Field(min_length=1)
+
+
+@router.post("/projects/{project_id}/ask")
+async def ask_about_project(
+    project_id: int, request: AskRequest, db: Session = Depends(get_db)
+):
+    """Ask something about a project, answered from its commit history.
+
+    Streamed, and grounded: the prompt is the computed timeline, so an answer
+    can cite the month, area or file it came from. It is explicitly not the
+    source code -- the history says what changed and when, not how a function
+    works -- and the prompt says so, because a model asked about code it
+    cannot see will otherwise describe what such code usually looks like.
+    """
+    _require_ai()
+    project = _project_with_history(db, project_id)
+
+    data = history.timeline(db, project)
+    if not data["commits"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No commits recorded for {project.repo} yet. Sync it first.",
+        )
+
+    system = assistant.ask_system(history.as_text(data, project))
+    question = request.question.strip()
+
+    async def events():
+        try:
+            async for chunk in ai.stream(
+                system=system, messages=[{"role": "user", "content": question}]
+            ):
+                yield ai.sse("delta", chunk)
+        except (ai.AIFailed, ai.AINotConfigured) as exc:
+            yield ai.sse("error", str(exc))
+        yield ai.sse("done", True)
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

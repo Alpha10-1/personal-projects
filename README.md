@@ -230,6 +230,52 @@ A project's **GitHub repo** field is on the project form and is optional —
 leave it blank and that project stays off GitHub entirely. Filling it in is
 what turns on activity ingestion, the two suggestion rules, and the Repo tab.
 
+### Reading a project out of its history
+
+Different question from the repo review above, which reads recent commits
+looking for bugs. This reads the *whole* history to answer "what is this, and
+how did it get this way" — which is the question you have when you come back
+to something after three months.
+
+```bash
+curl -X POST localhost:8000/activity/deep-sync     # which files each commit touched
+curl localhost:8000/ai/projects/1/timeline          # the arithmetic, free
+curl -X POST localhost:8000/ai/projects/1/history   # the written summary
+```
+
+**The timeline needs no key and costs nothing.** Commits per month, which
+parts of the tree they touched, when each area first and last appeared, the
+most-changed files, who wrote them. That is arithmetic, and computing it here
+rather than asking a model means the answer can be checked — and that the
+model is handed facts to narrate instead of commit messages to guess from.
+
+The **deep sync** is what makes file-level detail possible. The commit *list*
+endpoint does not include which files changed, so that costs one request per
+commit and is therefore a separate, explicit pass. It is incremental: only
+commits missing their detail are fetched, newest first, so a long history is
+walked back a chunk at a time. `still_missing` says whether there is more.
+
+The written summary says what the project is, the phases it went through,
+where the work concentrated, and what the shape suggests — a two-month gap is
+a pause, an area touched once is abandoned or finished. It lands as a note,
+and a better project summary is only ever *proposed*.
+
+### Asking about a project
+
+```bash
+curl -X POST localhost:8000/ai/projects/1/ask   -H 'Content-Type: application/json'   -d '{"question": "When did testing start, and what was there before?"}'
+```
+
+Streamed, and grounded in that same timeline, so an answer cites the month,
+area or file it came from. It is explicitly **not** the source code — the
+history says what changed and when, not how a function works — and the prompt
+says so, because a model asked about code it cannot see will otherwise
+describe what such code usually looks like.
+
+Asked whether a project has two-factor authentication, it answers "no commit
+mentions it" and names the file you would have to read to be sure. That is
+the intended behaviour, not a limitation to work around.
+
 ---
 
 ## The personal side
@@ -643,6 +689,7 @@ backend/
     review.py      the deterministic rules: findings and suggestions
     collaboration.py  turning git history into named people
     routes/personal.py  your own repos, imports and brainstorms
+    history.py     what a repo's commit history says, as arithmetic
     share.py       the read-only snapshot you send someone
     powerbi.py     the Power BI Service: reports and refresh state
     ai.py          the model client -- the only thing that leaves the machine

@@ -232,6 +232,14 @@ class ActivityEvent(Base):
     # guess is never mistaken for something the user stated.
     linked_by = Column(String(20), nullable=True)
 
+    # Which files this commit touched, and by how much, as JSON:
+    #   {"files": [{"path": ..., "status": ..., "additions": n, "deletions": n}],
+    #    "additions": n, "deletions": n}
+    # The commit *list* endpoint does not include this -- it costs one request
+    # per commit -- so it is filled in by a deep sync rather than the ordinary
+    # one, and null simply means "not fetched yet".
+    file_stats = Column(Text, nullable=True)
+
     # Resolved from `actor` when a person with that github_login exists. Stored
     # rather than joined at read time so the attribution survives someone
     # renaming their GitHub account, and re-resolved by /people/relink when a
