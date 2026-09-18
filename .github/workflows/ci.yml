@@ -29,6 +29,29 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # NO_COLOR so the counts can be read back out of the log below without
+      # having to strip escape codes; vitest colours its output even when it
+      # is being piped.
+      - name: Test
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee "$RUNNER_TEMP/vitest.txt"
+        env:
+          NO_COLOR: "1"
+
+      # Same reasoning as the backend's: a green tick says vitest exited 0, not
+      # how much of the suite it found.
+      - name: Report the counts
+        if: success() || failure()
+        run: |
+          if [ ! -f "$RUNNER_TEMP/vitest.txt" ]; then
+            echo "::notice title=vitest::did not run"
+            exit 0
+          fi
+          counts=$(grep -E '^ *(Test Files|Tests) ' "$RUNNER_TEMP/vitest.txt" |
+            tr '\n' ' ' | tr -s ' ')
+          echo "::notice title=vitest::${counts:-no output}"
+
       # Next 16 removed `next lint`, so the build is a separate check rather
       # than something the lint step covers.
       - name: Build

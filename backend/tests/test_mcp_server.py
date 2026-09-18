@@ -6,6 +6,7 @@ point being to catch a tool that builds a request the API rejects.
 """
 
 import json
+from datetime import datetime
 
 import httpx
 import pytest
@@ -59,6 +60,21 @@ async def test_every_tool_is_registered_with_a_description():
         "log_time",
         "add_note",
         "update_project",
+        "project_timeline",
+        "deep_sync_commits",
+        "list_people",
+        "add_person",
+        "project_team",
+        "add_member",
+        "list_feedback",
+        "add_feedback",
+        "update_feedback",
+        "list_repos",
+        "import_repos",
+        "list_brainstorms",
+        "read_brainstorm",
+        "list_dashboards",
+        "add_dashboard",
     } <= set(by_name)
     assert all(t.description for t in tools)
 
@@ -72,6 +88,8 @@ async def test_read_and_write_tools_are_annotated_distinctly():
     assert by_name["list_tasks"].annotations.read_only_hint is True
     assert by_name["create_task"].annotations.read_only_hint is False
     assert by_name["update_task"].annotations.read_only_hint is False
+    assert by_name["project_timeline"].annotations.read_only_hint is True
+    assert by_name["import_repos"].annotations.read_only_hint is False
 
 
 def test_prune_drops_unset_arguments_but_keeps_falsy_ones():
@@ -311,7 +329,7 @@ async def test_deep_sync_fills_in_the_missing_detail(mcp, repo_project, monkeypa
 
     result = await mcp.deep_sync_commits(repo="me/oms")
 
-    assert result[0]["fetched"] == 1
+    assert result[0]["filled"] == 1
     assert result[0]["still_missing"] == 0
     assert (await mcp.project_timeline(project_id=repo_project.id))["detailed"] == 2
 
@@ -328,7 +346,7 @@ async def test_a_person_added_with_a_login_picks_up_their_existing_work(mcp, mak
 
     person = await mcp.add_person(name="Dana", github_login="dana")
 
-    assert person["contributions"] == 1
+    assert person["contribution_count"] == 1
 
 
 @pytest.mark.anyio
@@ -336,7 +354,7 @@ async def test_project_team_gathers_members_contributors_and_feedback(mcp, make)
     project = make.project(name="OMS", repo="me/oms")
     make.event(repo="me/oms", external_id="c1", project_id=project.id, actor="dana")
     person = await mcp.add_person(name="Dana", github_login="dana")
-    await mcp.add_member(project_id=project.id, person_id=person["id"], role="reviewer")
+    await mcp.add_member(project_id=project.id, person_id=person["id"], role="contributor")
     await mcp.add_feedback(
         body="The export should stream, not buffer.",
         project_id=project.id,
@@ -345,7 +363,7 @@ async def test_project_team_gathers_members_contributors_and_feedback(mcp, make)
 
     team = await mcp.project_team(project_id=project.id)
 
-    assert [m["role"] for m in team["members"]] == ["reviewer"]
+    assert [m["role"] for m in team["members"]] == ["contributor"]
     assert [c["login"] for c in team["contributors"]] == ["dana"]
     assert team["feedback_open"] == 1
 
@@ -362,10 +380,10 @@ async def test_feedback_typed_in_cannot_claim_to_be_a_review_comment(mcp):
 async def test_feedback_can_be_closed_once_it_is_dealt_with(mcp):
     item = await mcp.add_feedback(body="Rename the column.")
 
-    await mcp.update_feedback(feedback_id=item["id"], status="addressed")
+    await mcp.update_feedback(feedback_id=item["id"], status="actioned")
 
     assert await mcp.list_feedback() == []
-    assert len(await mcp.list_feedback(status="addressed")) == 1
+    assert len(await mcp.list_feedback(status="actioned")) == 1
 
 
 @pytest.mark.anyio

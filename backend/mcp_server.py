@@ -678,9 +678,9 @@ async def project_team(project_id: int) -> dict:
 
 @server.tool(
     description=(
-        "Link a person to a project. `role` is viewer, contributor or "
-        "reviewer -- viewer means they are shown the progress, the other two "
-        "mean their work is expected to appear in it."
+        "Link a person to a project. `role` is viewer or contributor -- a "
+        "viewer is shown the progress, a contributor is someone whose work is "
+        "expected to appear in it."
     ),
     annotations=WRITES,
 )
@@ -695,7 +695,7 @@ async def add_member(project_id: int, person_id: int, role: Optional[str] = None
 @server.tool(
     description=(
         "What people have said: review comments, issue comments and notes "
-        "typed by hand. `status` is open (the default), addressed, declined "
+        "typed by hand. `status` is open (the default), actioned, declined "
         "or all. These are the suggestions git never records."
     ),
     annotations=READS,
@@ -748,9 +748,9 @@ async def add_feedback(
 
 @server.tool(
     description=(
-        "Change a piece of feedback: mark it addressed or declined, or attach "
-        "it to the right person or project. Only mark something addressed "
-        "when the work it asked for has actually been done."
+        "Change a piece of feedback: mark it actioned or declined, or attach "
+        "it to the right person or project. Only mark something actioned when "
+        "the work it asked for has actually been done."
     ),
     annotations=WRITES,
 )
