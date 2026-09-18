@@ -40,6 +40,7 @@ import TaskForm from "@/components/TaskForm";
 import ProjectForm from "@/components/ProjectForm";
 import LibraryPanels from "@/components/LibraryPanels";
 import RepoInsights from "@/components/RepoInsights";
+import Dashboards from "@/components/Dashboards";
 import ProjectTeam from "@/components/ProjectTeam";
 import TimeLogPanel from "@/components/TimeLogPanel";
 
@@ -47,7 +48,7 @@ const TABS = [
   { key: "tasks", label: "Tasks" },
   { key: "milestones", label: "Milestones" },
   { key: "time", label: "Time" },
-  { key: "library", label: "Notes & files" },
+  { key: "library", label: "Notes, files & reports" },
   { key: "team", label: "Team" },
   { key: "repo", label: "Repo" },
   { key: "brief", label: "Brief" },
@@ -473,7 +474,10 @@ export default function ProjectDetailPage() {
       ) : null}
 
       {tab === "library" ? (
-        <LibraryPanels projectId={projectId} projects={allProjects.data || []} />
+        <div className="space-y-5">
+          <LibraryPanels projectId={projectId} projects={allProjects.data || []} />
+          <Dashboards projectId={projectId} />
+        </div>
       ) : null}
 
       {tab === "team" ? <ProjectTeam project={p} /> : null}

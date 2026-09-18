@@ -431,3 +431,51 @@ class BrainstormMessage(Base):
     role = Column(String(20), nullable=False)
     content = Column(Text, nullable=False)
     created_at = Column(DateTime, default=utcnow, index=True)
+
+
+# --- Dashboards -------------------------------------------------------------
+
+# manual: a link you pasted. powerbi: mirrored from the Power BI REST API.
+DASHBOARD_SOURCES = ("manual", "powerbi")
+
+
+class Dashboard(Base):
+    """A report or dashboard, linked to the work it reports on.
+
+    One table for both halves deliberately. A link you paste today and a
+    report synced from the Power BI Service tomorrow are the same thing to
+    everyone reading the project -- the difference is only whether anything
+    can be known about its refresh state, and a null there says exactly that.
+
+    Matching a pasted link to a synced report is by `external_id`: paste a
+    report URL now and the sync fills in the workspace, dataset and refresh
+    state later rather than creating a duplicate beside it.
+    """
+
+    __tablename__ = "dashboards"
+
+    id = Column(Integer, primary_key=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+
+    name = Column(String(255), nullable=False)
+    url = Column(Text, nullable=True)
+    note = Column(Text, nullable=True)
+
+    source = Column(String(20), nullable=False, default="manual", index=True)
+    # The provider's report id. Unique so a sync cannot duplicate a row, and
+    # nullable because a pasted link may not have one yet.
+    external_id = Column(String(255), nullable=True, unique=True)
+
+    workspace_id = Column(String(255), nullable=True)
+    workspace_name = Column(String(255), nullable=True)
+    dataset_id = Column(String(255), nullable=True)
+    dataset_name = Column(String(255), nullable=True)
+
+    # What the provider last said about the data behind it. Null means
+    # unknown, which is the honest state for a link nobody can check.
+    last_refresh_at = Column(DateTime, nullable=True)
+    refresh_status = Column(String(40), nullable=True, index=True)
+    refresh_error = Column(Text, nullable=True)
+
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)

@@ -300,6 +300,71 @@ thinking.
 
 ---
 
+## Power BI
+
+Two halves, and the first needs nothing set up.
+
+**Linking a report works immediately.** Paste its URL on a project's *Notes,
+files & reports* tab and the tracker knows which report belongs to which
+work. That is useful on its own, and it is all most projects need.
+
+**Connecting the Service adds refresh state** — whether the data behind a
+report is still updating, and when it last did. Nothing in the tracker would
+otherwise tell you a report has been quietly showing last month's numbers.
+
+```bash
+curl localhost:8000/powerbi/status
+curl -X POST localhost:8000/powerbi/sync
+```
+
+A synced report whose last refresh **failed**, on a live work project,
+becomes a `dashboard_refresh_failed` finding on the Review page. Personal
+projects are out of scope like everything else there, and so is a report
+nobody has linked to a project — there would be no project for the finding to
+be about.
+
+### What to ask IT for
+
+Authentication is a **service principal** (client credentials, no user
+sign-in) because this has to run from a scheduled task with nobody at the
+keyboard. Two things are needed, and neither can be done from an ordinary
+account:
+
+1. An **Azure AD app registration**, giving you a tenant ID, client ID and
+   client secret.
+2. **"Service principals can use Power BI APIs"** enabled in the Power BI
+   admin portal, with the app added to a security group if the setting is
+   scoped to one.
+
+Then add the principal **to each workspace you want read**, as Viewer. Scope
+it to those workspaces rather than granting tenant-wide read — it sees every
+workspace it is added to, and this code being careful is not a substitute for
+not granting it in the first place.
+
+```
+PBI_TENANT_ID=…
+PBI_CLIENT_ID=…
+PBI_CLIENT_SECRET=…
+```
+
+**To try it before raising a ticket**, paste a token from the Power BI
+developer tools as `PBI_ACCESS_TOKEN`. It expires in about an hour, which is
+long enough to see whether any of this is worth the request.
+
+### What a sync does to your rows
+
+Idempotent on the report id. An existing row **keeps its project link and
+your note** — those are yours — while the name, workspace, dataset and
+refresh state are overwritten, because those are the Service's to state.
+
+A link you pasted earlier is *adopted* rather than duplicated: the report id
+is pulled out of the URL when you paste it, so the sync recognises the same
+report. Deleting a synced row removes it here only; it stays in Power BI and
+returns on the next sync, which is correct — this mirrors the Service, it
+does not govern it.
+
+---
+
 ## People and collaboration
 
 Other people can be linked to a project, either to be kept informed or
@@ -529,6 +594,7 @@ backend/
     collaboration.py  turning git history into named people
     routes/personal.py  your own repos, imports and brainstorms
     share.py       the read-only snapshot you send someone
+    powerbi.py     the Power BI Service: reports and refresh state
     ai.py          the model client -- the only thing that leaves the machine
     assistant.py   what the model is told, and what it is asked for
     routes/        projects, milestones, tasks, time_logs, library, dashboard, ai

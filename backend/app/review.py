@@ -207,6 +207,36 @@ def find(db: Session, stale_days: int = STALE_DAYS) -> list[Finding]:
                 )
             )
 
+    # A report whose data stopped refreshing is reporting yesterday's numbers
+    # to whoever opens it, and nothing in the tracker would otherwise say so.
+    # Only reports attached to a live work project: an unlinked one belongs to
+    # nobody here, and a personal one is out of scope like everything else.
+    live_ids = {p.id for p in projects}
+    for board in db.execute(
+        select(models.Dashboard).where(
+            models.Dashboard.refresh_status == "Failed",
+            models.Dashboard.project_id.is_not(None),
+        )
+    ).scalars():
+        if board.project_id not in live_ids:
+            continue
+        when = (
+            f" Last tried {board.last_refresh_at:%Y-%m-%d}."
+            if board.last_refresh_at
+            else ""
+        )
+        findings.append(
+            Finding(
+                rule="dashboard_refresh_failed",
+                severity="warn",
+                target_type="dashboard",
+                target_id=board.id,
+                title=f"{board.name} is showing stale data",
+                detail=f"Its last dataset refresh failed.{when}",
+                evidence=[e for e in (board.workspace_name, board.dataset_name) if e],
+            )
+        )
+
     unlinked = db.execute(
         select(func.count(models.ActivityEvent.id)).where(
             models.ActivityEvent.project_id.is_(None)

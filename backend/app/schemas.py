@@ -477,3 +477,26 @@ class FeedbackOut(ORMModel):
     resolved_at: Optional[datetime]
 
     person_name: Optional[str] = None
+
+
+# --- Dashboards --------------------------------------------------------------
+
+DashboardSource = Literal["manual", "powerbi"]
+
+
+class DashboardOut(ORMModel):
+    id: int
+    project_id: Optional[int]
+    name: str
+    url: Optional[str]
+    note: Optional[str]
+    source: DashboardSource
+    external_id: Optional[str]
+    workspace_name: Optional[str]
+    dataset_name: Optional[str]
+    last_refresh_at: Optional[datetime]
+    refresh_status: Optional[str]
+    refresh_error: Optional[str]
+    created_at: datetime
+
+    project_name: Optional[str] = None

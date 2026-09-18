@@ -188,6 +188,7 @@ def delete_project(project_id: int, db: Session = Depends(get_db)):
         # they point at the project, so they still have to go before it.
         models.ProjectMember,
         models.Feedback,
+        models.Dashboard,
         models.TimeLog,
         models.Note,
         models.Link,
