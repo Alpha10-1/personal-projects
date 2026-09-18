@@ -627,6 +627,8 @@ Frontend — Next 16 removed `next lint`, so linting is the ESLint CLI:
 ```bash
 npm run lint    # eslint .
 npm run lint:fix
+npm test        # vitest run -- jsdom, no dev server and no backend
+npm run test:watch
 npm run build
 ```
 
