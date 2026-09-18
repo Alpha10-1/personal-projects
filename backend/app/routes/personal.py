@@ -53,17 +53,22 @@ def list_repos(
 ):
     """Every repo on your GitHub account, with whether it's already imported.
 
-    The account is taken from `?user=`, then `PP_GITHUB_USER`, then the owner
-    of a repo already mapped to a project -- which is nearly always right and
-    saves asking for something the database already knows.
+    The account is worked out rather than asked for: an explicit `?user=`,
+    then `PP_GITHUB_USER`, then whoever `GITHUB_TOKEN` belongs to, then the
+    owner of this checkout's own git remote -- which needs no setting up at
+    all, because the tracker is itself a repository on the account in
+    question. Only if all of that fails is there a question to ask.
+
+    `resolved_from` comes back with the answer so the UI can say *why* it is
+    showing this account, rather than silently picking one.
     """
-    who = user or github.github_user() or github.owner_from_projects(db)
+    who, how = github.resolve_account(db, user)
     if not who:
         raise HTTPException(
             status_code=400,
             detail=(
-                "Don't know whose repos to list. Pass ?user=your-login, or set "
-                "PP_GITHUB_USER in backend/.env."
+                "Couldn't work out whose repos to list. Pass ?user=your-login, "
+                "or set PP_GITHUB_USER in backend/.env."
             ),
         )
 
@@ -84,6 +89,7 @@ def list_repos(
 
     return {
         "user": who,
+        "resolved_from": how,
         "authenticated": bool(os.getenv("GITHUB_TOKEN")),
         "count": len(repos),
         "repos": repos,
@@ -107,15 +113,13 @@ def import_repos(payload: ImportRequest, db: Session = Depends(get_db)):
         ).scalars()
     )
 
-    # The owner is in the names being imported, so fall back to those before
-    # giving up on metadata -- importing into an empty tracker is the first
-    # thing anyone does, and that is exactly when the other two are unset.
+    # The owner is also in the names being imported, so that is the last
+    # fallback after the shared resolution.
     def _owner_of(full_name: str) -> Optional[str]:
         return full_name.split("/", 1)[0] if "/" in full_name else None
 
     who = (
-        github.github_user()
-        or github.owner_from_projects(db)
+        github.resolve_account(db)[0]
         or next((o for o in map(_owner_of, payload.repos) if o), None)
     )
     try:

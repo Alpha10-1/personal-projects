@@ -111,9 +111,12 @@ function Repos({ onImported }) {
           <CardHeader
             title={`${repos.data.user} — ${repos.data.count} repo${repos.data.count === 1 ? "" : "s"}`}
             subtitle={
-              repos.data.authenticated
+              // Say which account and how it was worked out. Showing someone
+              // else's repos silently would be worse than asking.
+              `Found from ${repos.data.resolved_from}. ` +
+              (repos.data.authenticated
                 ? "Including private repos, via GITHUB_TOKEN."
-                : "Public repos only. Add GITHUB_TOKEN to backend/.env to see private ones."
+                : "Public repos only — add GITHUB_TOKEN to backend/.env to see private ones.")
             }
             action={
               <div className="flex gap-1.5">
@@ -200,13 +203,18 @@ function Repos({ onImported }) {
 }
 
 export default function PersonalPage() {
-  const [tab, setTab] = useState("projects");
+  const [tab, setTab] = useState(null);
 
   const projects = useAsync(
     useCallback(() => api.get("/projects", { workspace: "personal" }), []),
     [],
   );
   const list = projects.data || [];
+
+  // Opens on your repos when there is nothing here yet, because that is the
+  // only useful thing to do on an empty personal side. Derived rather than
+  // set from an effect once the projects load.
+  const active = tab ?? (projects.data && list.length === 0 ? "repos" : "projects");
 
   return (
     <div className="space-y-5">
@@ -224,9 +232,9 @@ export default function PersonalPage() {
             key={key}
             type="button"
             onClick={() => setTab(key)}
-            aria-current={tab === key ? "page" : undefined}
+            aria-current={active === key ? "page" : undefined}
             className={`-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm transition-colors ${
-              tab === key
+              active === key
                 ? "border-[var(--accent)] font-medium text-[var(--accent)]"
                 : "border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
             }`}
@@ -237,7 +245,7 @@ export default function PersonalPage() {
         ))}
       </div>
 
-      {tab === "projects" ? (
+      {active === "projects" ? (
         <>
           <ErrorNote error={projects.error} onDismiss={() => projects.reload()} />
           {projects.loading && !projects.data ? <Spinner /> : null}
@@ -261,15 +269,15 @@ export default function PersonalPage() {
         </>
       ) : null}
 
-      {tab === "repos" ? (
+      {active === "repos" ? (
         <Repos onImported={() => projects.reload({ quiet: true })} />
       ) : null}
 
-      {tab === "new" ? (
+      {active === "new" ? (
         <Scaffold onCreated={() => projects.reload({ quiet: true })} />
       ) : null}
 
-      {tab === "brainstorm" ? <BrainstormPanel projects={list} /> : null}
+      {active === "brainstorm" ? <BrainstormPanel projects={list} /> : null}
     </div>
   );
 }

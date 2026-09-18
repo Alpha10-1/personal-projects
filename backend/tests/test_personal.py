@@ -122,15 +122,107 @@ def test_a_personal_project_past_its_date_is_not_a_finding(client, make):
 # --- Repos -------------------------------------------------------------------
 
 
-def test_listing_repos_needs_to_know_whose(client):
+@pytest.fixture
+def no_account_clues(monkeypatch):
+    """Strip every source of an account except the one under test."""
+    from app import github
+
+    monkeypatch.delenv("PP_GITHUB_USER", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.setattr(github, "owner_from_git_remote", lambda: None)
+    monkeypatch.setattr(github, "owner_from_token", lambda: None)
+
+
+def test_the_account_comes_from_the_checkout_s_own_git_remote(client, monkeypatch):
+    """The point of the whole chain: with nothing configured and no project
+    mapped, it still knows whose repos to show, because the tracker is itself
+    a repository on that account."""
+    from app import github
+
+    monkeypatch.delenv("PP_GITHUB_USER", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.setattr(github, "owner_from_git_remote", lambda: "Alpha10-1")
+    monkeypatch.setattr(github, "fetch_user_repos", lambda user, limit=100: [repo_payload()])
+
+    body = client.get("/personal/repos").json()
+
+    assert body["user"] == "Alpha10-1"
+    assert body["resolved_from"] == "this repository's git remote"
+
+
+def test_a_real_git_config_is_read(tmp_path, monkeypatch):
+    """Parsed rather than shelled out to, so it works without git on PATH."""
+    from app import github
+
+    repo = tmp_path / "checkout"
+    (repo / ".git").mkdir(parents=True)
+    (repo / ".git" / "config").write_text(
+        '''[remote "origin"]
+    url = https://github.com/Someone/their-repo.git
+    fetch = +refs/heads/*:refs/remotes/origin/*
+''',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(github, "__file__", str(repo / "app" / "github.py"))
+
+    assert github.owner_from_git_remote() == "Someone"
+
+
+@pytest.mark.parametrize(
+    "url,owner",
+    [
+        ("https://github.com/Alpha10-1/personal-projects.git", "Alpha10-1"),
+        ("git@github.com:Alpha10-1/personal-projects.git", "Alpha10-1"),
+        ("ssh://git@github.com/Alpha10-1/personal-projects", "Alpha10-1"),
+        ("https://github.com/Alpha10-1/personal-projects", "Alpha10-1"),
+        ("https://gitlab.com/Alpha10-1/thing.git", None),
+    ],
+)
+def test_every_url_form_git_writes(url, owner):
+    from app import github
+
+    match = github.REMOTE_OWNER.search(url)
+    assert (match.group(1) if match else None) == owner
+
+
+def test_a_token_beats_the_git_remote(client, monkeypatch):
+    """The token's own account is the only one that also unlocks private
+    repos, so it wins over a remote that might be a fork."""
+    from app import github
+
+    monkeypatch.delenv("PP_GITHUB_USER", raising=False)
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp-not-real")
+    monkeypatch.setattr(github, "owner_from_token", lambda: "TheTokenOwner")
+    monkeypatch.setattr(github, "owner_from_git_remote", lambda: "SomeoneElse")
+    monkeypatch.setattr(github, "fetch_user_repos", lambda user, limit=100: [])
+
+    body = client.get("/personal/repos").json()
+
+    assert body["user"] == "TheTokenOwner"
+    assert body["resolved_from"] == "the GITHUB_TOKEN account"
+
+
+def test_an_explicit_user_wins_over_everything(client, monkeypatch):
+    from app import github
+
+    monkeypatch.setenv("PP_GITHUB_USER", "Configured")
+    monkeypatch.setattr(github, "fetch_user_repos", lambda user, limit=100: [])
+
+    body = client.get("/personal/repos", params={"user": "Asked"}).json()
+
+    assert body["user"] == "Asked"
+    assert body["resolved_from"] == "asked for"
+
+
+def test_only_a_machine_with_nothing_to_go_on_has_to_ask(client, no_account_clues):
     response = client.get("/personal/repos")
 
     assert response.status_code == 400
     assert "PP_GITHUB_USER" in response.json()["detail"]
 
 
-def test_the_account_is_inferred_from_a_mapped_repo(client, make, monkeypatch):
-    """The database already knows the owner; asking again would be rude."""
+def test_the_account_is_inferred_from_a_mapped_repo(client, make, monkeypatch, no_account_clues):
+    """Last resort, when even the checkout has no remote."""
     from app import github
 
     make.project(name="Work", repo="Alpha10-1/personal-projects")
@@ -139,7 +231,7 @@ def test_the_account_is_inferred_from_a_mapped_repo(client, make, monkeypatch):
     body = client.get("/personal/repos").json()
 
     assert body["user"] == "Alpha10-1"
-    assert body["count"] == 1
+    assert body["resolved_from"] == "a repo already mapped to a project"
 
 
 def test_repos_say_which_are_already_imported(client, make, monkeypatch):

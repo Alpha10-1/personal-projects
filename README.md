@@ -245,16 +245,38 @@ tab, the chat floater.
 
 ### Import your repos
 
+Your repositories show up **without being configured and without being
+projects first**:
+
 ```bash
-curl "localhost:8000/personal/repos?user=your-login"
+curl localhost:8000/personal/repos
+```
+
+The account is worked out rather than asked for, in this order — and the
+answer comes back as `resolved_from` so the page can say *why* it is showing
+that account rather than silently picking one:
+
+| Order | Source |
+|---|---|
+| 1 | An explicit `?user=` |
+| 2 | `PP_GITHUB_USER` in `backend/.env` |
+| 3 | Whoever `GITHUB_TOKEN` belongs to — the only one that also unlocks private repos |
+| 4 | **This checkout's own git remote**, read straight out of `.git/config` |
+| 5 | The owner of a repo already mapped to a project |
+
+Step 4 is why it needs no setup: the tracker is itself a repository on the
+account in question, so the answer is already on disk. It is parsed rather
+than shelled out to, so it works whether or not `git` is on PATH, and it
+reads every remote, not just `origin` — a fork's `origin` may be someone
+else's account.
+
+```bash
 curl -X POST localhost:8000/personal/repos/import   -H 'Content-Type: application/json'   -d '{"repos": ["you/weather_etl", "you/course-finder-app"]}'
 ```
 
-Set `PP_GITHUB_USER` in `backend/.env` to stop passing `?user=`. Without
-`GITHUB_TOKEN` only public repos are listed; with one, private repos appear
-too. Already-imported repos are marked, and importing the same repo twice is
-a no-op — the obvious thing to do after importing five is to come back for
-the sixth.
+Already-imported repos are marked, and importing the same repo twice is a
+no-op — the obvious thing to do after importing five is to come back for the
+sixth. Without `GITHUB_TOKEN` only public repos are listed.
 
 ### From an idea to a full plan
 

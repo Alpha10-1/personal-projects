@@ -17,6 +17,7 @@ import os
 import re
 from collections.abc import Callable, Iterable
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Optional
 
 import httpx
@@ -563,3 +564,84 @@ def fetch_readme(repo: str, max_chars: int = 8000) -> str:
             return response.text[:max_chars]
     except (httpx.HTTPError, RuntimeError):
         return ""
+
+
+# --- Working out whose account this is --------------------------------------
+
+# owner/name out of any of the URL forms git writes:
+#   https://github.com/OWNER/REPO.git
+#   git@github.com:OWNER/REPO.git
+#   ssh://git@github.com/OWNER/REPO.git
+REMOTE_OWNER = re.compile(
+    r"github\.com[:/]+([\w.-]+)/([\w.-]+?)(?:\.git)?/?$", re.IGNORECASE
+)
+
+
+def owner_from_git_remote() -> Optional[str]:
+    """The GitHub account this checkout belongs to, read from .git/config.
+
+    The tracker is itself in a git repository with a GitHub remote, so the
+    account is already on disk and asking for it again is asking twice. Read
+    rather than shelled out to, so it works whether or not git is on PATH.
+    """
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        config = parent / ".git" / "config"
+        if not config.is_file():
+            continue
+        try:
+            text = config.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return None
+        # Every remote, not just origin: a fork's origin may be someone else's
+        # account while the one you push to is named something else.
+        for line in text.splitlines():
+            line = line.strip()
+            if not line.startswith("url"):
+                continue
+            match = REMOTE_OWNER.search(line.split("=", 1)[-1].strip())
+            if match:
+                return match.group(1)
+        return None
+    return None
+
+
+def owner_from_token() -> Optional[str]:
+    """Who the configured token belongs to.
+
+    The most authoritative answer when there is one, and the only one that
+    also unlocks private repos.
+    """
+    if not os.getenv("GITHUB_TOKEN"):
+        return None
+    try:
+        with httpx.Client(base_url=API_ROOT, headers=_headers(), timeout=TIMEOUT) as client:
+            response = client.get("/user")
+            if response.is_error:
+                return None
+            return response.json().get("login")
+    except httpx.HTTPError:
+        return None
+
+
+def resolve_account(db: Session, asked: Optional[str] = None) -> tuple[Optional[str], str]:
+    """Whose repos to list, and how that was decided.
+
+    Ordered by how much it can be trusted, and returned with its reason so the
+    UI can say why it is showing that account rather than silently picking one.
+    """
+    if asked:
+        return asked, "asked for"
+    configured = github_user()
+    if configured:
+        return configured, "PP_GITHUB_USER"
+    from_token = owner_from_token()
+    if from_token:
+        return from_token, "the GITHUB_TOKEN account"
+    from_remote = owner_from_git_remote()
+    if from_remote:
+        return from_remote, "this repository's git remote"
+    from_projects = owner_from_projects(db)
+    if from_projects:
+        return from_projects, "a repo already mapped to a project"
+    return None, "nothing to go on"
