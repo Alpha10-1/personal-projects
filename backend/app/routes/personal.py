@@ -50,6 +50,7 @@ def list_repos(
     db: Session = Depends(get_db),
     user: Optional[str] = None,
     limit: int = Query(100, ge=1, le=100),
+    fresh: bool = Query(False, description="Skip the cache and ask GitHub again."),
 ):
     """Every repo on your GitHub account, with whether it's already imported.
 
@@ -73,7 +74,7 @@ def list_repos(
         )
 
     try:
-        payloads = github.fetch_user_repos(who, limit=limit)
+        payloads = github.fetch_user_repos(who, limit=limit, fresh=fresh)
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -91,6 +92,9 @@ def list_repos(
         "user": who,
         "resolved_from": how,
         "authenticated": bool(os.getenv("GITHUB_TOKEN")),
+        # Surfaced so the quota is visible while there is still some left,
+        # rather than only in the error when there is none.
+        "rate_limit": github.rate_limit(),
         "count": len(repos),
         "repos": repos,
     }

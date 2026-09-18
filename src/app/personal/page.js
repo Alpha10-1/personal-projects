@@ -72,6 +72,21 @@ function Repos({ onImported }) {
   const [error, setError] = useState(null);
 
   const repos = useAsync(useCallback(() => api.get("/personal/repos"), []), []);
+  const [refreshing, setRefreshing] = useState(false);
+
+  // The plain reload would be served from the server's cache, which is the
+  // right default but not what a refresh button means.
+  const hardRefresh = async () => {
+    setRefreshing(true);
+    setError(null);
+    try {
+      repos.setData(await api.get("/personal/repos", { fresh: true }));
+    } catch (err) {
+      setError(err);
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   const toggle = (name) =>
     setPicked((current) => {
@@ -120,7 +135,7 @@ function Repos({ onImported }) {
             }
             action={
               <div className="flex gap-1.5">
-                <Button size="sm" onClick={() => repos.reload()}>
+                <Button size="sm" busy={refreshing} onClick={hardRefresh}>
                   <RefreshCw size={13} />
                 </Button>
                 <Button
@@ -135,6 +150,22 @@ function Repos({ onImported }) {
               </div>
             }
           />
+
+          {repos.data.rate_limit?.limit ? (
+            <p
+              className={`border-b border-[var(--border)] px-4 py-2 text-xs ${
+                repos.data.rate_limit.remaining <= 10
+                  ? "text-[var(--warning,#d97706)]"
+                  : "text-[var(--text-muted)]"
+              }`}
+            >
+              {repos.data.rate_limit.remaining} of {repos.data.rate_limit.limit}{" "}
+              GitHub requests left this hour
+              {repos.data.rate_limit.remaining <= 10 && !repos.data.authenticated
+                ? " — a token in backend/.env raises this to 5000."
+                : ""}
+            </p>
+          ) : null}
 
           {available.length ? (
             <div className="flex flex-wrap gap-1.5 border-b border-[var(--border)] px-4 py-2">

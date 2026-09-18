@@ -7,7 +7,9 @@ point of having two sides.
 """
 
 import json
+import os
 
+import httpx
 import pytest
 from conftest import days_ago
 
@@ -142,7 +144,7 @@ def test_the_account_comes_from_the_checkout_s_own_git_remote(client, monkeypatc
     monkeypatch.delenv("PP_GITHUB_USER", raising=False)
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
     monkeypatch.setattr(github, "owner_from_git_remote", lambda: "Alpha10-1")
-    monkeypatch.setattr(github, "fetch_user_repos", lambda user, limit=100: [repo_payload()])
+    monkeypatch.setattr(github, "fetch_user_repos", lambda user, limit=100, **kw: [repo_payload()])
 
     body = client.get("/personal/repos").json()
 
@@ -194,7 +196,7 @@ def test_a_token_beats_the_git_remote(client, monkeypatch):
     monkeypatch.setenv("GITHUB_TOKEN", "ghp-not-real")
     monkeypatch.setattr(github, "owner_from_token", lambda: "TheTokenOwner")
     monkeypatch.setattr(github, "owner_from_git_remote", lambda: "SomeoneElse")
-    monkeypatch.setattr(github, "fetch_user_repos", lambda user, limit=100: [])
+    monkeypatch.setattr(github, "fetch_user_repos", lambda user, limit=100, **kw: [])
 
     body = client.get("/personal/repos").json()
 
@@ -206,7 +208,7 @@ def test_an_explicit_user_wins_over_everything(client, monkeypatch):
     from app import github
 
     monkeypatch.setenv("PP_GITHUB_USER", "Configured")
-    monkeypatch.setattr(github, "fetch_user_repos", lambda user, limit=100: [])
+    monkeypatch.setattr(github, "fetch_user_repos", lambda user, limit=100, **kw: [])
 
     body = client.get("/personal/repos", params={"user": "Asked"}).json()
 
@@ -226,7 +228,7 @@ def test_the_account_is_inferred_from_a_mapped_repo(client, make, monkeypatch, n
     from app import github
 
     make.project(name="Work", repo="Alpha10-1/personal-projects")
-    monkeypatch.setattr(github, "fetch_user_repos", lambda user, limit=100: [repo_payload()])
+    monkeypatch.setattr(github, "fetch_user_repos", lambda user, limit=100, **kw: [repo_payload()])
 
     body = client.get("/personal/repos").json()
 
@@ -241,7 +243,7 @@ def test_repos_say_which_are_already_imported(client, make, monkeypatch):
     monkeypatch.setattr(
         github,
         "fetch_user_repos",
-        lambda user, limit=100: [repo_payload(), repo_payload(name="glam-glow")],
+        lambda user, limit=100, **kw: [repo_payload(), repo_payload(name="glam-glow")],
     )
 
     repos = client.get("/personal/repos", params={"user": "Alpha10-1"}).json()["repos"]
@@ -254,7 +256,7 @@ def test_repos_say_which_are_already_imported(client, make, monkeypatch):
 def test_importing_creates_personal_projects(client, db, monkeypatch):
     from app import github
 
-    monkeypatch.setattr(github, "fetch_user_repos", lambda user, limit=100: [repo_payload()])
+    monkeypatch.setattr(github, "fetch_user_repos", lambda user, limit=100, **kw: [repo_payload()])
 
     created = client.post(
         "/personal/repos/import", json={"repos": ["Alpha10-1/weather_etl"]}
@@ -273,7 +275,7 @@ def test_importing_the_same_repo_twice_is_a_no_op(client, db, monkeypatch):
     import the sixth."""
     from app import github
 
-    monkeypatch.setattr(github, "fetch_user_repos", lambda user, limit=100: [repo_payload()])
+    monkeypatch.setattr(github, "fetch_user_repos", lambda user, limit=100, **kw: [repo_payload()])
     client.post("/personal/repos/import", json={"repos": ["Alpha10-1/weather_etl"]})
 
     again = client.post(
@@ -289,7 +291,7 @@ def test_importing_survives_a_failed_listing(client, db, monkeypatch):
     better than losing the import."""
     from app import github
 
-    def unavailable(user, limit=100):
+    def unavailable(user, limit=100, **kw):
         raise RuntimeError("GitHub 403: rate limited")
 
     monkeypatch.setattr(github, "fetch_user_repos", unavailable)
@@ -692,3 +694,205 @@ def test_the_personal_routes_are_unavailable_without_a_key(client, monkeypatch):
         client.post(f"/ai/brainstorms/{session['id']}/turn", json={"content": "x"}).status_code
         == 503
     )
+
+
+# --- Not spending the quota twice on the same answer -------------------------
+
+
+@pytest.fixture(autouse=True)
+def empty_repo_cache():
+    """The cache is module-level, so a test that filled it would otherwise
+    answer for the next one."""
+    from app import github
+
+    github.clear_repo_cache()
+    yield
+    github.clear_repo_cache()
+
+
+def test_the_repo_list_is_cached(monkeypatch):
+    """Unauthenticated GitHub allows 60 calls an hour. Opening the personal
+    page a dozen times must not spend a fifth of that on an answer that has
+    not changed."""
+    from app import github
+
+    calls = []
+    monkeypatch.setattr(
+        github,
+        "_fetch_user_repos_uncached",
+        lambda user, limit=100: calls.append(user) or [repo_payload()],
+    )
+
+    github.fetch_user_repos("Alpha10-1")
+    github.fetch_user_repos("Alpha10-1")
+    github.fetch_user_repos("Alpha10-1")
+
+    assert len(calls) == 1
+
+
+def test_refreshing_bypasses_the_cache(monkeypatch):
+    from app import github
+
+    calls = []
+    monkeypatch.setattr(
+        github,
+        "_fetch_user_repos_uncached",
+        lambda user, limit=100: calls.append(user) or [],
+    )
+
+    github.fetch_user_repos("Alpha10-1")
+    github.fetch_user_repos("Alpha10-1", fresh=True)
+
+    assert len(calls) == 2
+
+
+def test_a_token_appearing_invalidates_the_cache(monkeypatch):
+    """The same account answers differently once private repos are visible,
+    so a cached public-only answer must not survive the token being set."""
+    from app import github
+
+    calls = []
+    monkeypatch.setattr(
+        github,
+        "_fetch_user_repos_uncached",
+        lambda user, limit=100: calls.append(bool(os.getenv("GITHUB_TOKEN"))) or [],
+    )
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    github.fetch_user_repos("Alpha10-1")
+
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp-not-real")
+    github.fetch_user_repos("Alpha10-1")
+
+    assert calls == [False, True]
+
+
+def test_different_accounts_do_not_share_a_cache(monkeypatch):
+    from app import github
+
+    calls = []
+    monkeypatch.setattr(
+        github,
+        "_fetch_user_repos_uncached",
+        lambda user, limit=100: calls.append(user) or [],
+    )
+
+    github.fetch_user_repos("one")
+    github.fetch_user_repos("two")
+
+    assert calls == ["one", "two"]
+
+
+# --- Saying what an exhausted quota actually is ------------------------------
+
+
+def fake_response(status, body, headers=None):
+    return httpx.Response(
+        status_code=status,
+        json=body,
+        headers=headers or {},
+        request=httpx.Request("GET", "https://api.github.com/x"),
+    )
+
+
+def test_a_spent_quota_is_named_and_not_mistaken_for_permissions(monkeypatch):
+    """GitHub returns 403, which reads as "you are not allowed" unless the
+    real cause is spelled out -- along with the fix."""
+    from app import github
+
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    response = fake_response(
+        403,
+        {"message": "API rate limit exceeded for 1.2.3.4."},
+        {
+            "x-ratelimit-limit": "60",
+            "x-ratelimit-remaining": "0",
+            "x-ratelimit-reset": "1789721410",
+        },
+    )
+
+    with pytest.raises(RuntimeError) as exc:
+        github._raise_for_github(response, "owner/name")
+
+    message = str(exc.value)
+    assert "rate limit reached" in message
+    assert "GITHUB_TOKEN" in message
+    assert "5000" in message
+
+
+def test_the_fix_is_not_suggested_when_it_is_already_applied(monkeypatch):
+    from app import github
+
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp-not-real")
+    response = fake_response(
+        403,
+        {"message": "API rate limit exceeded."},
+        {"x-ratelimit-limit": "5000", "x-ratelimit-remaining": "0"},
+    )
+
+    with pytest.raises(RuntimeError) as exc:
+        github._raise_for_github(response, "owner/name")
+
+    assert "GITHUB_TOKEN" not in str(exc.value)
+
+
+def test_an_ordinary_403_is_left_alone(monkeypatch):
+    """Not every 403 is a rate limit, and rewriting them all would hide the
+    real reason."""
+    from app import github
+
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    response = fake_response(
+        403,
+        {"message": "Resource not accessible by personal access token"},
+        {"x-ratelimit-limit": "60", "x-ratelimit-remaining": "42"},
+    )
+
+    with pytest.raises(RuntimeError, match="not accessible"):
+        github._raise_for_github(response, "owner/name")
+
+
+def test_the_quota_is_read_off_any_successful_response(monkeypatch):
+    """Tracked for free from headers GitHub already sends, rather than
+    costing a call of its own."""
+    from app import github
+
+    github._LAST_RATE.clear()
+    github._raise_for_github(
+        fake_response(
+            200,
+            [],
+            {
+                "x-ratelimit-limit": "60",
+                "x-ratelimit-remaining": "37",
+                "x-ratelimit-reset": "1789721410",
+            },
+        ),
+        "owner/name",
+    )
+
+    seen = github.rate_limit()
+    assert seen["limit"] == 60
+    assert seen["remaining"] == 37
+    assert seen["reset_at"] is not None
+
+
+def test_nothing_is_claimed_before_anything_is_fetched():
+    """Reporting a guessed quota would be worse than reporting none."""
+    from app import github
+
+    github._LAST_RATE.clear()
+
+    assert github.rate_limit() == {}
+
+
+def test_the_quota_reaches_the_api(client, monkeypatch):
+    from app import github
+
+    monkeypatch.setattr(github, "owner_from_git_remote", lambda: "Alpha10-1")
+    monkeypatch.setattr(github, "fetch_user_repos", lambda user, limit=100, **kw: [])
+    github._LAST_RATE.clear()
+    github._LAST_RATE.update({"limit": 60, "remaining": 12, "reset_at": None})
+
+    body = client.get("/personal/repos").json()
+
+    assert body["rate_limit"]["remaining"] == 12

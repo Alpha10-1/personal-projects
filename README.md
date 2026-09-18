@@ -276,7 +276,35 @@ curl -X POST localhost:8000/personal/repos/import   -H 'Content-Type: applicatio
 
 Already-imported repos are marked, and importing the same repo twice is a
 no-op — the obvious thing to do after importing five is to come back for the
-sixth. Without `GITHUB_TOKEN` only public repos are listed.
+sixth.
+
+### The rate limit, and the token
+
+**Unauthenticated GitHub allows 60 requests an hour.** That is less than it
+sounds: listing your repos is one, a sync is two per repo, and a repo review
+is one per commit. An afternoon of opening the personal page can spend it.
+
+Two things keep that survivable. The repo listing is **cached for five
+minutes**, so revisiting the page costs nothing — the refresh button asks
+again (`?fresh=true`) when you actually want it to. And the remaining quota
+is shown on the page, read from headers GitHub already sends, so it costs no
+call of its own. When it does run out the error says so plainly, rather than
+the bare `403` GitHub returns, which reads as a permissions problem.
+
+**A token raises the limit to 5000 an hour and shows your private repos.**
+
+1. github.com → Settings → Developer settings → Personal access tokens →
+   **Fine-grained tokens** → Generate new token
+2. Repository access: **All repositories** (or just the ones you want listed)
+3. Permissions → Repository permissions → **Contents: Read-only** and
+   **Metadata: Read-only**. Nothing else — this only ever reads.
+4. Put it in `backend/.env` as `GITHUB_TOKEN=github_pat_…` and restart the
+   backend.
+
+A classic token works too; it needs the `repo` scope, which grants
+considerably more than the fine-grained pair above, so prefer fine-grained.
+The token is also the more authoritative answer to *whose* repos to list, so
+setting it takes priority over the git remote.
 
 ### From an idea to a full plan
 

@@ -15,6 +15,7 @@ facts can be re-interpreted later without re-fetching the history.
 import json
 import os
 import re
+import time
 from collections.abc import Callable, Iterable
 from datetime import datetime
 from pathlib import Path
@@ -97,13 +98,67 @@ def fetch_from_github(repo: str, since: Optional[datetime], limit: int) -> list[
     return out
 
 
+# GitHub reports the quota on every response, so it is tracked for free
+# rather than costing a call of its own to ask about.
+_LAST_RATE: dict[str, Any] = {}
+
+# Unauthenticated callers get 60 requests an hour, which one afternoon of
+# opening the repo list will spend. A token raises it to 5000.
+ANON_HOURLY_LIMIT = 60
+
+
+def _note_rate_limit(response: httpx.Response) -> None:
+    headers = response.headers
+    if "x-ratelimit-limit" not in headers:
+        return
+    try:
+        reset = int(headers.get("x-ratelimit-reset", 0))
+    except ValueError:
+        reset = 0
+    _LAST_RATE.update(
+        {
+            "limit": int(headers.get("x-ratelimit-limit", 0) or 0),
+            "remaining": int(headers.get("x-ratelimit-remaining", 0) or 0),
+            "reset_at": datetime.fromtimestamp(reset) if reset else None,
+            "authenticated": bool(os.getenv("GITHUB_TOKEN")),
+            "seen_at": datetime.now(),
+        }
+    )
+
+
+def rate_limit() -> dict:
+    """What GitHub last said about the quota.
+
+    Empty until something has actually been fetched -- reporting a guess
+    would be worse than reporting nothing.
+    """
+    return dict(_LAST_RATE)
+
+
 def _raise_for_github(response: httpx.Response, repo: str) -> None:
+    _note_rate_limit(response)
     if not response.is_error:
         return
     try:
         message = response.json().get("message", response.reason_phrase)
     except ValueError:
         message = response.reason_phrase
+
+    # A spent quota arrives as a 403 whose message is about rate limits, which
+    # reads as a permissions problem unless it is named. It is also the one
+    # GitHub error with an obvious fix, so the fix goes in the message.
+    exhausted = _LAST_RATE.get("remaining") == 0 or "rate limit" in str(message).lower()
+    if response.status_code in (403, 429) and exhausted:
+        reset = _LAST_RATE.get("reset_at")
+        when = f" It resets at {reset:%H:%M}." if reset else ""
+        extra = (
+            ""
+            if os.getenv("GITHUB_TOKEN")
+            else " Set GITHUB_TOKEN in backend/.env to raise the limit from "
+            f"{ANON_HOURLY_LIMIT} an hour to 5000."
+        )
+        raise RuntimeError(f"GitHub rate limit reached.{when}{extra}")
+
     if response.status_code == 404:
         message = (
             f"{repo} not found. It may be private -- set GITHUB_TOKEN if so."
@@ -505,8 +560,37 @@ def owner_from_projects(db: Session) -> Optional[str]:
     return None
 
 
-def fetch_user_repos(user: str, limit: int = 100) -> list[dict]:
-    """Every repo on an account, newest activity first.
+# Your repositories do not change minute to minute, and the personal page
+# fetches them on every visit. Without this, opening that page a dozen times
+# spends a fifth of an unauthenticated hourly quota on an unchanged answer.
+REPO_CACHE_TTL = 300.0
+_REPO_CACHE: dict[tuple, tuple[float, list[dict]]] = {}
+
+
+def clear_repo_cache() -> None:
+    _REPO_CACHE.clear()
+
+
+def fetch_user_repos(user: str, limit: int = 100, *, fresh: bool = False) -> list[dict]:
+    """Every repo on an account, newest activity first, cached briefly.
+
+    `fresh` bypasses the cache, which is what the refresh button asks for.
+    The cache key includes whether a token is set, because the same account
+    answers differently once it can see private repos.
+    """
+    key = (user.lower(), limit, bool(os.getenv("GITHUB_TOKEN")))
+    if not fresh:
+        hit = _REPO_CACHE.get(key)
+        if hit and (time.monotonic() - hit[0]) < REPO_CACHE_TTL:
+            return hit[1]
+
+    payloads = _fetch_user_repos_uncached(user, limit)
+    _REPO_CACHE[key] = (time.monotonic(), payloads)
+    return payloads
+
+
+def _fetch_user_repos_uncached(user: str, limit: int = 100) -> list[dict]:
+    """The actual call.
 
     With `GITHUB_TOKEN` set this uses `/user/repos`, which includes private
     repos and anything the token can see. Without one it falls back to the
