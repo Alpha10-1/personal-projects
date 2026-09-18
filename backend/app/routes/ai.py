@@ -12,13 +12,22 @@ import json
 from datetime import date
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import ai, assistant, github, history, models, planner, planner_prompts
+from app import (
+    ai,
+    assistant,
+    github,
+    history,
+    models,
+    planner,
+    planner_prompts,
+    spend,
+)
 from app.db import get_db
 
 router = APIRouter(prefix="/ai", tags=["ai"])
@@ -131,7 +140,9 @@ async def chat(request: ChatRequest, db: Session = Depends(get_db)):
 
     async def events():
         try:
-            async for chunk in ai.stream(system=system, messages=turns):
+            async for chunk in ai.stream(
+                system=system, messages=turns, feature="chat"
+            ):
                 yield ai.sse("delta", chunk)
         except (ai.AIFailed, ai.AINotConfigured) as exc:
             # The 200 and headers went out with the first byte, so a failure
@@ -504,7 +515,12 @@ async def brainstorm_turn(
     async def events():
         collected: list[str] = []
         try:
-            async for chunk in ai.stream(system=system, messages=turns):
+            async for chunk in ai.stream(
+                system=system,
+                messages=turns,
+                feature="brainstorm",
+                project_id=session.project_id,
+            ):
                 collected.append(chunk)
                 yield ai.sse("delta", chunk)
         except (ai.AIFailed, ai.AINotConfigured) as exc:
@@ -782,7 +798,10 @@ async def ask_about_project(
     async def events():
         try:
             async for chunk in ai.stream(
-                system=system, messages=[{"role": "user", "content": question}]
+                system=system,
+                messages=[{"role": "user", "content": question}],
+                feature="ask",
+                project_id=project.id,
             ):
                 yield ai.sse("delta", chunk)
         except (ai.AIFailed, ai.AINotConfigured) as exc:
@@ -843,7 +862,7 @@ async def plan_project(
     if request.research:
         try:
             researched = await planner_prompts.do_research(
-                context_text, request.focus, request.max_searches
+                context_text, request.focus, request.max_searches, project.id
             )
         except ai.AIFailed as exc:
             # A failed search must not cost the plan: it is an input, not the
@@ -855,6 +874,7 @@ async def plan_project(
             context_text,
             research_text=(researched or {}).get("text") or None,
             focus=request.focus,
+            project_id=project.id,
         )
     except ai.AINotConfigured as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -974,4 +994,38 @@ def apply_plan(
         "tasks_created": created,
         "total_hours": dated.get("total_hours"),
         "finishes": dated.get("finishes") if request.set_target_dates else None,
+    }
+
+
+# --- What it has cost --------------------------------------------------------
+
+
+@router.get("/spend")
+def ai_spend(
+    days: int = Query(30, ge=1, le=365),
+    recent: int = Query(20, ge=0, le=200),
+    db: Session = Depends(get_db),
+):
+    """Every model call this system has made, and what it cost.
+
+    Not behind the AI guard: the whole point is to be able to read the bill
+    when the assistant is switched off, or after turning it off because of
+    the bill.
+
+    Costs are the ones computed when each call was made, at the rates in
+    `spend.py`. They are an estimate of the API's own billing, not a
+    statement from it -- close enough to answer "is this worth it", not a
+    substitute for the invoice.
+    """
+    return {
+        **spend.summary(db, days=days),
+        "recent": spend.last_calls(db, limit=recent) if recent else [],
+        "rates": {
+            model: {
+                "input_per_mtok": rate.input_per_mtok,
+                "output_per_mtok": rate.output_per_mtok,
+            }
+            for model, rate in spend.RATES.items()
+        },
+        "web_search_usd": spend.WEB_SEARCH_USD,
     }

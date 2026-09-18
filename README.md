@@ -258,6 +258,22 @@ history wins.
 
 ### What it costs
 
+Every model call is recorded when it is made -- which feature spent it, which
+model, the token counts the API reported, and the dollar figure computed from
+them. **Insights -> What the assistant costs** reads it back, grouped by
+feature so "is the repo review worth it" is answerable, and `GET /ai/spend`
+is the same thing over HTTP. That endpoint is deliberately not behind the AI
+guard: the moment you most want to read the bill is after switching the
+assistant off because of it.
+
+Failed calls are counted too. A feature that fails twice and succeeds once
+spent three calls' worth of input tokens, and a ledger of successes hides
+that. Costs are stored per call rather than derived on read, so a later
+change to the rate table cannot silently rewrite what last month cost, and a
+model with no published rate is counted, left unpriced, and named in the
+reply rather than being guessed at.
+
+
 Suggestions fire on a pause in typing, not a keystroke: 900ms of quiet, and
 only once a draft has something in it. A request supersedes the one before
 it, so a long sentence is one call rather than forty. The repo review reads

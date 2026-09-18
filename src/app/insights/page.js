@@ -12,6 +12,7 @@ import {
   HoursByWeekChart,
   ThroughputChart,
 } from "@/components/charts";
+import AiSpend from "@/components/AiSpend";
 
 const WINDOWS = [
   { value: 28, label: "4 weeks" },
@@ -234,6 +235,8 @@ export default function InsightsPage() {
           </Card>
         </>
       ) : null}
+
+      <AiSpend />
     </div>
   );
 }

@@ -20,6 +20,7 @@ is visible at the call site instead of buried in a prompt.
 import asyncio
 import json
 import os
+import time
 from collections.abc import AsyncIterator
 from typing import Any, Optional
 
@@ -119,6 +120,39 @@ def clip(text: Optional[str], limit: int = MAX_CONTEXT_CHARS) -> str:
     return text[:limit] + f"\n... [truncated at {limit} characters]"
 
 
+def _meter(
+    feature: str,
+    model: str,
+    usage,
+    project_id: Optional[int],
+    started: float,
+    *,
+    ok: bool = True,
+    error: Optional[str] = None,
+) -> None:
+    """Record one call in the ledger.
+
+    Imported here rather than at module level: `spend` opens the database,
+    and this module is otherwise free of it -- the import stays inside the
+    one function that needs it so the dependency is visible at the point of
+    use, and so importing `ai` never pulls in the database by itself.
+    """
+    try:
+        from app import spend
+
+        spend.record(
+            feature=feature,
+            model=model,
+            usage=usage,
+            project_id=project_id,
+            ok=ok,
+            error=error,
+            seconds=time.monotonic() - started,
+        )
+    except Exception:  # pragma: no cover - accounting never breaks a feature
+        pass
+
+
 def _unwrap(exc: Exception) -> str:
     """Turn an SDK error into something worth showing a person.
 
@@ -146,14 +180,23 @@ async def structured(
     model: str = FAST_MODEL,
     max_tokens: int = MAX_SUGGEST_TOKENS,
     timeout: float = REQUEST_TIMEOUT,
+    feature: Optional[str] = None,
+    project_id: Optional[int] = None,
 ) -> dict[str, Any]:
     """Ask for JSON and actually get JSON.
 
     Forcing a tool call rather than asking for JSON in prose is what makes
     this safe to parse: there is no prose to strip, no fenced block, and the
     shape is the schema rather than whatever the model felt like emitting.
+
+    The ledger entry is labelled with `tool_name` unless the caller says
+    otherwise, because every caller already names its tool after the job it
+    is doing. Deriving it means a feature added later is attributed correctly
+    without anyone having to remember a second argument.
     """
+    feature = feature or tool_name
     client = _client(timeout)
+    started = time.monotonic()
     try:
         message = await client.messages.create(
             model=model,
@@ -170,7 +213,11 @@ async def structured(
             tool_choice={"type": "tool", "name": tool_name},
         )
     except Exception as exc:
-        raise AIFailed(_unwrap(exc)) from exc
+        reason = _unwrap(exc)
+        _meter(feature, model, None, project_id, started, ok=False, error=reason)
+        raise AIFailed(reason) from exc
+
+    _meter(feature, model, message.usage, project_id, started)
 
     for block in message.content:
         if getattr(block, "type", None) == "tool_use":
@@ -186,6 +233,8 @@ async def research(
     model: str = CHAT_MODEL,
     max_tokens: int = MAX_RESEARCH_TOKENS,
     timeout: float = RESEARCH_TIMEOUT,
+    feature: str = "research",
+    project_id: Optional[int] = None,
 ) -> dict[str, Any]:
     """Let the model look things up, and record what it read.
 
@@ -199,6 +248,7 @@ async def research(
     checked, and one the model remembered cannot.
     """
     client = _client(timeout)
+    started = time.monotonic()
     try:
         message = await client.messages.create(
             model=model,
@@ -214,7 +264,11 @@ async def research(
             ],
         )
     except Exception as exc:
-        raise AIFailed(_unwrap(exc)) from exc
+        reason = _unwrap(exc)
+        _meter(feature, model, None, project_id, started, ok=False, error=reason)
+        raise AIFailed(reason) from exc
+
+    _meter(feature, model, getattr(message, "usage", None), project_id, started)
 
     parts: list[str] = []
     sources: dict[str, str] = {}
@@ -243,6 +297,8 @@ async def stream(
     messages: list[dict],
     model: str = CHAT_MODEL,
     max_tokens: int = MAX_CHAT_TOKENS,
+    feature: str = "chat",
+    project_id: Optional[int] = None,
 ) -> AsyncIterator[str]:
     """Yield the answer as it is written.
 
@@ -251,6 +307,7 @@ async def stream(
     conversation.
     """
     client = _client()
+    started = time.monotonic()
     try:
         async with client.messages.stream(
             model=model,
@@ -260,8 +317,15 @@ async def stream(
         ) as streamed:
             async for chunk in streamed.text_stream:
                 yield chunk
+            # Only available once the stream is drained, which is why this
+            # sits inside the context manager rather than after it.
+            final = await streamed.get_final_message()
     except Exception as exc:
-        raise AIFailed(_unwrap(exc)) from exc
+        reason = _unwrap(exc)
+        _meter(feature, model, None, project_id, started, ok=False, error=reason)
+        raise AIFailed(reason) from exc
+
+    _meter(feature, model, getattr(final, "usage", None), project_id, started)
 
 
 def sse(event: str, data: Any) -> str:

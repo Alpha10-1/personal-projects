@@ -487,3 +487,44 @@ class Dashboard(Base):
 
     created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class AiUsage(Base):
+    """One model call, and what it cost.
+
+    Written by `ai.py` on every call it makes, successful or not, because the
+    question "what am I spending" is unanswerable if only the successes are
+    counted -- a feature that fails twice and succeeds once costs three calls'
+    worth of input tokens.
+
+    Token counts are what the API reported; `cost_usd` is computed from them
+    at the rates in `spend.py` and stored rather than derived on read, so a
+    price change from now on cannot silently rewrite what last month cost.
+    """
+
+    __tablename__ = "ai_usage"
+
+    id = Column(Integer, primary_key=True)
+    at = Column(DateTime, default=utcnow, index=True)
+
+    # Which part of the app spent this: suggest_project, chat, repo_review,
+    # history, plan, research... Indexed because "where does the money go" is
+    # the question this table exists to answer.
+    feature = Column(String(60), nullable=False, index=True)
+    model = Column(String(80), nullable=False, index=True)
+
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+
+    input_tokens = Column(Integer, nullable=False, default=0)
+    output_tokens = Column(Integer, nullable=False, default=0)
+    cache_read_tokens = Column(Integer, nullable=False, default=0)
+    cache_write_tokens = Column(Integer, nullable=False, default=0)
+    web_searches = Column(Integer, nullable=False, default=0)
+
+    cost_usd = Column(Float, nullable=False, default=0.0)
+
+    # A call that failed still spent time and may have spent tokens; the
+    # reason is kept so a run of failures can be told apart from a quiet week.
+    ok = Column(Boolean, nullable=False, default=True, index=True)
+    error = Column(String(255), nullable=True)
+    seconds = Column(Float, nullable=True)

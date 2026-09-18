@@ -54,12 +54,17 @@ def research_prompt(context_text: str, focus: Optional[str] = None) -> str:
 
 
 async def do_research(
-    context_text: str, focus: Optional[str] = None, max_searches: int = ai.MAX_SEARCHES
+    context_text: str,
+    focus: Optional[str] = None,
+    max_searches: int = ai.MAX_SEARCHES,
+    project_id: Optional[int] = None,
 ) -> dict:
     return await ai.research(
         system=RESEARCH_SYSTEM,
         prompt=ai.clip(research_prompt(context_text, focus), ai.MAX_CONTEXT_CHARS * 4),
         max_searches=max_searches,
+        feature="research",
+        project_id=project_id,
     )
 
 
@@ -202,6 +207,7 @@ async def plan(
     *,
     research_text: Optional[str] = None,
     focus: Optional[str] = None,
+    project_id: Optional[int] = None,
 ) -> dict:
     """Two or three things worth doing next, each costed in hours."""
     lines = [context_text]
@@ -225,4 +231,6 @@ async def plan(
         model=ai.CHAT_MODEL,
         max_tokens=ai.MAX_PLAN_TOKENS,
         timeout=ai.RESEARCH_TIMEOUT,
+        feature="plan",
+        project_id=project_id,
     )
