@@ -160,11 +160,17 @@ python analyst_run.py              # sync + propose
 python analyst_run.py --dry-run    # report only, change nothing
 python analyst_run.py --note       # also write the digest into the tracker
 python analyst_run.py --quiet      # print only on failure (what the task runs)
+python analyst_run.py --no-autostart   # fail if nothing is already serving
 ```
 
-It talks to the HTTP API, stamps its writes as `agent`, exits 1 if the
-backend isn't running, and appends every run to
-`backend/data/analyst-runs.jsonl`.
+It talks to the HTTP API, stamps its writes as `agent`, and appends every run
+to `backend/data/analyst-runs.jsonl`.
+
+If nothing is serving that API it starts a backend itself, runs, and stops it
+again -- so an unattended run does not depend on your having opened the app
+first. It only ever stops a backend it started (`started_api` in the run log
+says which happened), and only starts one for an address on this machine;
+that server's own output goes to `backend/data/analyst-backend.log`.
 
 A Windows scheduled task **`PersonalProjects-AnalystRun`** runs it daily at
 07:30:
@@ -175,8 +181,8 @@ Start-ScheduledTask   -TaskName PersonalProjects-AnalystRun   # run it now
 Unregister-ScheduledTask -TaskName PersonalProjects-AnalystRun -Confirm:$false
 ```
 
-It needs the backend running to do anything; when it isn't, the run is
-recorded as a failure and nothing else happens.
+The task is set to start when available, so a 07:30 it slept through runs
+when the machine next wakes. It does not wake the machine by itself.
 
 ---
 
