@@ -161,13 +161,11 @@ OPTION_ITEM = {
         },
         "tasks": {"type": "array", "items": TASK_ITEM, "maxItems": 20},
     },
-    "required": [
-        "title",
-        "what_it_is_for",
-        "why_this_project_needs_it",
-        "confidence",
-        "tasks",
-    ],
+    # `confidence` is deliberately not required. Nested `required` is not
+    # enforced by the API -- asking for it and getting it back missing was
+    # observed on two runs out of two -- so anything reading this must treat
+    # every optional field as absent rather than trusting the schema.
+    "required": ["title", "what_it_is_for", "why_this_project_needs_it", "tasks"],
 }
 
 PLAN_SCHEMA = {

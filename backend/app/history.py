@@ -204,8 +204,14 @@ def as_text(data: dict, project: models.Project) -> str:
         for line in period["subjects"]:
             lines.append(f"      - {line}")
 
+    # Both lists below are rankings, and both say so. Without that, absence
+    # from a top-N list reads as absence from the repository, and a plan gets
+    # written to build something that is already there.
     if data["areas"]:
-        lines.append("\nWHERE THE WORK WENT (by part of the tree)")
+        lines.append(
+            f"\nWHERE THE WORK WENT (the {len(data['areas'])} busiest parts of "
+            "the tree, not every part)"
+        )
         for area in data["areas"]:
             lines.append(
                 f"  {area['area']}: {area['commits']} commits, "
@@ -214,7 +220,12 @@ def as_text(data: dict, project: models.Project) -> str:
             )
 
     if data["files"]:
-        lines.append("\nMOST-CHANGED FILES")
+        lines.append(
+            f"\nMOST-CHANGED FILES (the top {len(data['files'])} by churn. A "
+            "file missing from this list was changed less often; it does not "
+            "mean the file does not exist, and says nothing about whether a "
+            "feature was built)"
+        )
         for item in data["files"]:
             lines.append(
                 f"  {item['path']} ({item['commits']} commits, {item['churn']} lines)"

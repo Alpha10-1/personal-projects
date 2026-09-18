@@ -554,3 +554,21 @@ def test_the_stored_note_carries_no_debris(
     assert '"]' not in body
     assert "A management system." in body
     assert db.query(models.Suggestion).one().proposed_value == "A system."
+
+
+def test_the_rankings_say_they_are_rankings(db, repo_project):
+    """A file missing from a top-15 list still exists.
+
+    Left unsaid, a model reads absence from the list as absence from the
+    repository and plans work to build what is already built -- which is
+    exactly what happened before this line was added.
+    """
+    project, commit = repo_project
+    for index in range(20):
+        commit(f"s{index}", at(index + 1, month=7), "work", [f"src/pages/p{index}.jsx"])
+
+    text = history.as_text(history.timeline(db, project), project)
+
+    assert "not every part" in text
+    assert "does not mean the file does not exist" in text
+    assert "says nothing about whether a feature was built" in text

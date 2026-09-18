@@ -203,7 +203,9 @@ with truncation marked so the model can tell it was cut off.
 |---|---|
 | New project / new task | Suggests summary, objective, done criteria, priority and first tasks **as you type** |
 | Floating chat, every page | Answers questions about your projects, tasks, notes and GitHub activity |
-| Project → Repo tab | Summary, possible bugs and improvements over recent commits |
+| Project → Repo tab | Summary, possible bugs and improvements over recent commits, read against the README |
+| Project → Repo tab | What the whole commit history says the project is, and questions answered from it |
+| Project → Plan tab | What to do next, as two or three costed options you choose between |
 
 **Nothing is applied on its own.** Every suggestion is a button, and the chat
 can read the tracker but cannot write to it. That is the same line
@@ -215,6 +217,44 @@ Two models, because the jobs differ. Suggestions go to Haiku, which is fast
 enough to feel live; chat and repo review go to Sonnet, where the answer
 matters more than a second of latency. Override with `PP_AI_FAST_MODEL` and
 `PP_AI_MODEL`.
+
+### Planning the next stretch
+
+The **Plan** tab reads four things and says which is which: the README (what
+the project claims), the commit history (what was actually built), the board
+(so it does not re-plan planned work) and your notes. It comes back with two
+or three *different* directions -- not one instruction -- each with
+milestones, tasks and hour estimates, and each having to name the evidence it
+rests on.
+
+**The model estimates effort; the dates are arithmetic.** How long 12 hours
+takes depends on how many hours a week you have, which is a fact about you
+rather than about the work, so it is computed here. Changing 10 hours a week
+to 4 re-dates the whole plan instantly and costs nothing.
+
+Nothing is written until you pick an option and press the button, and what
+gets created is exactly what is on screen -- including the tasks you dropped
+from it. Everything lands stamped `agent`.
+
+Estimates are honest about being unvalidated: until finished tasks have both
+an estimate and logged hours against them, the prompt says so in those words
+rather than implying the numbers are calibrated. Once they do, the median
+ratio of actual to estimated is passed in and the model is told to bias
+accordingly.
+
+### Research (off by default)
+
+Ticking **Search the web first** lets the model look things up before
+planning -- current practice for the stack this project actually uses, known
+problems with the libraries it names -- and every claim comes back with the
+page it came from, listed and linked.
+
+It is off unless you ask, for two reasons: one search costs roughly what a
+whole ordinary call does, and the queries are derived from your project, so a
+repository name or a problem description can reach a search engine. Research
+is also ranked *below* the commit history in the prompt: a web page is what
+someone wrote, the history is what happened, and where they disagree the
+history wins.
 
 ### What it costs
 
