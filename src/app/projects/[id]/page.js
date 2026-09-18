@@ -42,6 +42,7 @@ import LibraryPanels from "@/components/LibraryPanels";
 import RepoInsights from "@/components/RepoInsights";
 import Dashboards from "@/components/Dashboards";
 import ProjectHistory from "@/components/ProjectHistory";
+import ProjectPlan from "@/components/ProjectPlan";
 import ProjectTeam from "@/components/ProjectTeam";
 import TimeLogPanel from "@/components/TimeLogPanel";
 
@@ -52,6 +53,7 @@ const TABS = [
   { key: "library", label: "Notes, files & reports" },
   { key: "team", label: "Team" },
   { key: "repo", label: "Repo" },
+  { key: "plan", label: "Plan" },
   { key: "brief", label: "Brief" },
 ];
 
@@ -488,6 +490,10 @@ export default function ProjectDetailPage() {
           <ProjectHistory project={p} />
           <RepoInsights project={p} />
         </div>
+      ) : null}
+
+      {tab === "plan" ? (
+        <ProjectPlan project={p} onApplied={() => { tasks.reload(); milestones.reload(); }} />
       ) : null}
 
       {tab === "brief" ? (

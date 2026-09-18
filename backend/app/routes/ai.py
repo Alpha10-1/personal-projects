@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import ai, assistant, github, history, models
+from app import ai, assistant, github, history, models, planner, planner_prompts
 from app.db import get_db
 
 router = APIRouter(prefix="/ai", tags=["ai"])
@@ -42,6 +42,21 @@ class ChatTurn(BaseModel):
 
 class ChatRequest(BaseModel):
     messages: list[ChatTurn]
+
+
+def _readme_for(project: models.Project) -> str:
+    """The README, or nothing.
+
+    A repo without one is ordinary, and a network hiccup here should cost the
+    plan a section rather than the whole call -- the commit history is the
+    better evidence anyway.
+    """
+    if not project.repo:
+        return ""
+    try:
+        return github.fetch_readme(project.repo)
+    except (RuntimeError, OSError):
+        return ""
 
 
 def _require_ai() -> None:
@@ -186,7 +201,7 @@ async def repo_review(project_id: int, db: Session = Depends(get_db)):
 
     try:
         result = await assistant.review_repo(
-            repo=project.repo, events=events, diffs=diffs
+            repo=project.repo, events=events, diffs=diffs, readme=_readme_for(project)
         )
     except ai.AINotConfigured as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -647,7 +662,9 @@ async def project_history(project_id: int, db: Session = Depends(get_db)):
         )
 
     try:
-        result = await assistant.summarise_history(history.as_text(data, project))
+        result = await assistant.summarise_history(
+            history.as_text(data, project), readme=_readme_for(project)
+        )
     except ai.AINotConfigured as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ai.AIFailed as exc:
@@ -777,3 +794,184 @@ async def ask_about_project(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+# --- Planning what to do next ------------------------------------------------
+
+
+class PlanRequest(BaseModel):
+    """What to plan around, and how much to spend finding out."""
+
+    focus: Optional[str] = Field(
+        default=None,
+        description="Steer it: 'security', 'get it deployable', 'stop the churn'.",
+    )
+    research: bool = Field(
+        default=False,
+        description="Search the web first. Costs more, and sends queries about this project.",
+    )
+    max_searches: int = Field(default=ai.MAX_SEARCHES, ge=1, le=10)
+    hours_per_week: float = Field(default=planner.DEFAULT_HOURS_PER_WEEK, gt=0, le=80)
+    include_readme: bool = True
+
+
+@router.post("/projects/{project_id}/plan")
+async def plan_project(
+    project_id: int, request: PlanRequest, db: Session = Depends(get_db)
+):
+    """What to do next on this project, as a choice between real options.
+
+    Reads the README, the commit history, what is already on the board and
+    the written record, then proposes two or three different directions --
+    each with milestones, tasks and honest hour estimates.
+
+    Writes nothing. The dates attached to each option are computed here from
+    the model's hours and the weekly time you said you have, not asked for
+    from the model: changing 10 hours a week to 4 is then arithmetic rather
+    than another call.
+    """
+    _require_ai()
+    project = db.get(models.Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    readme = _readme_for(project) if request.include_readme else ""
+    data = planner.context(db, project, readme=readme)
+    context_text = planner.as_text(data)
+
+    researched = None
+    if request.research:
+        try:
+            researched = await planner_prompts.do_research(
+                context_text, request.focus, request.max_searches
+            )
+        except ai.AIFailed as exc:
+            # A failed search must not cost the plan: it is an input, not the
+            # point. The reply says it was asked for and did not arrive.
+            researched = {"text": "", "sources": [], "searches": 0, "error": str(exc)}
+
+    try:
+        result = await planner_prompts.plan(
+            context_text,
+            research_text=(researched or {}).get("text") or None,
+            focus=request.focus,
+        )
+    except ai.AINotConfigured as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ai.AIFailed as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    options = [
+        planner.schedule(option, hours_per_week=request.hours_per_week)
+        for option in result.get("options") or []
+    ]
+
+    return {
+        "project_id": project.id,
+        "repo": project.repo,
+        "reading": assistant.clean_prose(result.get("reading")),
+        "options": options,
+        "recommended": assistant.clean_prose(result.get("recommended")),
+        "not_worth_doing": result.get("not_worth_doing") or [],
+        "unknowns": result.get("unknowns") or [],
+        "research": researched,
+        "grounded_in": {
+            "readme": bool(readme),
+            "commits": data["timeline"].get("commits", 0),
+            "commits_detailed": data["timeline"].get("detailed", 0),
+            "open_tasks": len(data["open_tasks"]),
+            "notes": len(data["notes"]),
+            "estimates_calibrated": bool(data["calibration"]),
+        },
+        "hours_per_week": request.hours_per_week,
+    }
+
+
+class ApplyOptionRequest(BaseModel):
+    """One option, posted back after you have read it and dropped what you
+    did not want."""
+
+    option: dict
+    hours_per_week: float = Field(default=planner.DEFAULT_HOURS_PER_WEEK, gt=0, le=80)
+    set_target_dates: bool = True
+
+
+@router.post("/projects/{project_id}/plan/apply")
+def apply_plan(
+    project_id: int, request: ApplyOptionRequest, db: Session = Depends(get_db)
+):
+    """Create the milestones and tasks for the option you chose.
+
+    No model call: this builds exactly what you just read, including the rows
+    you removed from it. Everything is stamped `agent`, so a board filled in
+    ten seconds stays distinguishable from one you typed.
+
+    It adds to the project and never rewrites it -- your summary, status and
+    existing tasks are untouched.
+    """
+    project = db.get(models.Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    option = request.option or {}
+    if not (option.get("tasks") or option.get("milestones")):
+        raise HTTPException(status_code=400, detail="That option has nothing in it.")
+
+    dated = planner.schedule(option, hours_per_week=request.hours_per_week)
+
+    # Existing milestones keep their order; new ones continue after them.
+    position = len(planner.milestones(db, project.id))
+
+    by_title: dict[str, int] = {}
+    for milestone in dated.get("milestones") or []:
+        title = (milestone.get("title") or "").strip()
+        if not title:
+            continue
+        row = models.Milestone(
+            project_id=project.id,
+            title=title[:255],
+            detail=milestone.get("detail"),
+            position=position,
+            due_date=(
+                date.fromisoformat(milestone["due_date"])
+                if request.set_target_dates and milestone.get("due_date")
+                else None
+            ),
+        )
+        db.add(row)
+        db.flush()
+        by_title[title.lower()] = row.id
+        position += 1
+
+    created = 0
+    for task in option.get("tasks") or []:
+        title = (task.get("title") or "").strip()
+        if not title:
+            continue
+        named = (task.get("milestone") or "").strip().lower()
+        db.add(
+            models.Task(
+                project_id=project.id,
+                # A task naming a milestone that is not in this option is filed
+                # under the project rather than dropped: losing work to a typo
+                # in the model's own output is the worst failure available here.
+                milestone_id=by_title.get(named),
+                title=title[:255],
+                notes=task.get("notes"),
+                estimate_hours=task.get("estimate_hours"),
+                priority=task.get("priority") or "medium",
+                source="agent",
+            )
+        )
+        created += 1
+
+    db.commit()
+
+    return {
+        "project_id": project.id,
+        "option": dated.get("title"),
+        "milestones_created": len(by_title),
+        "tasks_created": created,
+        "total_hours": dated.get("total_hours"),
+        "finishes": dated.get("finishes") if request.set_target_dates else None,
+    }

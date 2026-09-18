@@ -409,9 +409,23 @@ REPO_SCHEMA = {
 }
 
 
-async def review_repo(*, repo: str, events: list, diffs: str) -> dict:
-    """Ask for a summary, risks and improvements over recent repo activity."""
-    lines = [f"Repository: {repo}", "", "RECENT ACTIVITY"]
+async def review_repo(
+    *, repo: str, events: list, diffs: str, readme: Optional[str] = None
+) -> dict:
+    """Ask for a summary, risks and improvements over recent repo activity.
+
+    The README comes first because it says what the code is *meant* to do,
+    which is what makes a diff reviewable: a change that quietly contradicts
+    the documented behaviour is a finding, and without the README it reads as
+    just another edit.
+    """
+    lines = [f"Repository: {repo}"]
+    if readme:
+        lines.append(
+            "\nWHAT THE PROJECT SAYS IT IS (its README -- a claim, not "
+            "evidence; the commits are the evidence)\n" + ai.clip(readme, 4000)
+        )
+    lines += ["", "RECENT ACTIVITY"]
     for e in events:
         lines.append(f"- {e.occurred_at:%Y-%m-%d} [{e.kind}] {ai.clip(e.title, 200)}")
     if diffs:
@@ -930,11 +944,29 @@ HISTORY_SCHEMA = {
 }
 
 
-async def summarise_history(timeline_text: str) -> dict:
-    """What the project is, and how it got that way."""
+async def summarise_history(
+    timeline_text: str, readme: Optional[str] = None
+) -> dict:
+    """What the project is, and how it got that way.
+
+    With the README, "what it is" comes from what the project says about
+    itself and the commits say whether that is still true. Without it, the
+    answer is inferred from file paths alone, which is a guess -- an accurate
+    one often, but a guess.
+    """
+    prompt = timeline_text
+    if readme:
+        prompt = (
+            "WHAT THE PROJECT SAYS IT IS (its README)\n"
+            + ai.clip(readme, 4000)
+            + "\n\nWHAT THE COMMITS SHOW (the evidence; where these disagree "
+            "with the README, say so -- a README describing something the "
+            "commits never built is itself worth reporting)\n\n"
+            + timeline_text
+        )
     return await ai.structured(
         system=HISTORY_SYSTEM,
-        prompt=ai.clip(timeline_text, ai.MAX_CONTEXT_CHARS * 3),
+        prompt=ai.clip(prompt, ai.MAX_CONTEXT_CHARS * 3),
         schema=HISTORY_SCHEMA,
         tool_name="summarise_history",
         model=ai.CHAT_MODEL,

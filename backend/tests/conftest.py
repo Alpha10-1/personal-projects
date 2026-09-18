@@ -169,7 +169,13 @@ def no_outbound_http(monkeypatch, request):
     def refuse_model(*_args, **_kwargs):
         raise AssertionError(
             "Test tried to call the Anthropic API, which costs money. Patch "
-            "ai.structured or ai.stream instead."
+            "ai.structured, ai.stream or ai.research instead."
+        )
+
+    async def refuse_search(*_args, **_kwargs):
+        raise AssertionError(
+            "Test tried to run a web search, which costs money and reaches "
+            "the open internet. Patch ai.research instead."
         )
 
     from app import ai, github
@@ -183,3 +189,7 @@ def no_outbound_http(monkeypatch, request):
     # The model is guarded at the client rather than at structured()/stream(),
     # so a test that patches neither is caught instead of quietly billing.
     monkeypatch.setattr(ai, "_client", refuse_model)
+    # Guarded separately from _client: research is the only call that leaves
+    # the Anthropic API for the open web, and a test that reaches it by
+    # accident should say so in those words.
+    monkeypatch.setattr(ai, "research", refuse_search)

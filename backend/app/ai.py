@@ -39,7 +39,17 @@ MAX_CONTEXT_CHARS = 6_000
 MAX_SUGGEST_TOKENS = 900
 MAX_CHAT_TOKENS = 2_000
 MAX_REVIEW_TOKENS = 2_500
+# A plan carries several whole options, each with milestones and tasks, so it
+# needs more room than a review of the same project would.
+MAX_PLAN_TOKENS = 8_000
+MAX_RESEARCH_TOKENS = 3_000
 REQUEST_TIMEOUT = 60.0
+
+# Searching is the expensive part: each result set comes back as input tokens,
+# so one search costs roughly what a whole ordinary call does. Capped, and
+# never on unless asked for.
+MAX_SEARCHES = 5
+RESEARCH_TIMEOUT = 180.0
 
 
 class AINotConfigured(RuntimeError):
@@ -71,9 +81,14 @@ def status() -> dict:
     }
 
 
-def _client():
+def _client(timeout: float = REQUEST_TIMEOUT):
     """Built per call rather than held as a module global, so that setting the
-    key in the environment takes effect without a restart."""
+    key in the environment takes effect without a restart.
+
+    The timeout is per call because the jobs differ by an order of magnitude:
+    a suggestion that takes a minute is broken, while a research call that
+    runs five searches legitimately takes several.
+    """
     if not is_configured():
         raise AINotConfigured(
             "ANTHROPIC_API_KEY is not set. Put it in backend/.env to switch the "
@@ -86,7 +101,7 @@ def _client():
             "The anthropic package isn't installed. `pip install -r "
             "requirements.txt` in backend/."
         ) from exc
-    return anthropic.AsyncAnthropic(api_key=api_key(), timeout=REQUEST_TIMEOUT)
+    return anthropic.AsyncAnthropic(api_key=api_key(), timeout=timeout)
 
 
 def clip(text: Optional[str], limit: int = MAX_CONTEXT_CHARS) -> str:
@@ -130,6 +145,7 @@ async def structured(
     tool_name: str = "respond",
     model: str = FAST_MODEL,
     max_tokens: int = MAX_SUGGEST_TOKENS,
+    timeout: float = REQUEST_TIMEOUT,
 ) -> dict[str, Any]:
     """Ask for JSON and actually get JSON.
 
@@ -137,7 +153,7 @@ async def structured(
     this safe to parse: there is no prose to strip, no fenced block, and the
     shape is the schema rather than whatever the model felt like emitting.
     """
-    client = _client()
+    client = _client(timeout)
     try:
         message = await client.messages.create(
             model=model,
@@ -160,6 +176,65 @@ async def structured(
         if getattr(block, "type", None) == "tool_use":
             return dict(block.input or {})
     raise AIFailed("The model returned nothing usable.")
+
+
+async def research(
+    *,
+    system: str,
+    prompt: str,
+    max_searches: int = MAX_SEARCHES,
+    model: str = CHAT_MODEL,
+    max_tokens: int = MAX_RESEARCH_TOKENS,
+    timeout: float = RESEARCH_TIMEOUT,
+) -> dict[str, Any]:
+    """Let the model look things up, and record what it read.
+
+    This is the only call that reaches beyond the Anthropic API: the search
+    runs on their side, but the queries are derived from your project, so a
+    repository name or a problem description can end up in a search engine.
+    It is never on by default anywhere -- the caller has to ask for it.
+
+    Comes back as prose plus the sources behind it. The citations are the
+    point: an improvement suggested because a real page says so can be
+    checked, and one the model remembered cannot.
+    """
+    client = _client(timeout)
+    try:
+        message = await client.messages.create(
+            model=model,
+            max_tokens=max_tokens,
+            system=system,
+            messages=[{"role": "user", "content": prompt}],
+            tools=[
+                {
+                    "type": "web_search_20250305",
+                    "name": "web_search",
+                    "max_uses": max(1, int(max_searches)),
+                }
+            ],
+        )
+    except Exception as exc:
+        raise AIFailed(_unwrap(exc)) from exc
+
+    parts: list[str] = []
+    sources: dict[str, str] = {}
+    for block in message.content:
+        if getattr(block, "type", None) != "text":
+            continue
+        parts.append(block.text)
+        for citation in getattr(block, "citations", None) or []:
+            url = getattr(citation, "url", None)
+            if url and url not in sources:
+                sources[url] = getattr(citation, "title", None) or url
+
+    usage = getattr(message, "usage", None)
+    searches = getattr(getattr(usage, "server_tool_use", None), "web_search_requests", 0)
+
+    return {
+        "text": "".join(parts).strip(),
+        "sources": [{"url": url, "title": title} for url, title in sources.items()],
+        "searches": searches or 0,
+    }
 
 
 async def stream(

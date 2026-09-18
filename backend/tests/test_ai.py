@@ -10,12 +10,16 @@ import json
 
 import pytest
 
-from app import ai, assistant
+from app import ai, assistant, github
 
 
 @pytest.fixture
 def configured(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-not-a-real-key")
+    # The review and the history both read the README now. A test that wants
+    # to see one says so; this default keeps the guard meaningful by making
+    # "no README" the explicit, ordinary case rather than a network call.
+    monkeypatch.setattr(github, "fetch_readme", lambda repo, max_chars=8000: "")
     return True
 
 

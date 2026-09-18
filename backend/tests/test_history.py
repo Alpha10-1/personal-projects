@@ -16,6 +16,10 @@ from app import github, history, models
 @pytest.fixture
 def configured(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-not-a-real-key")
+    # The review and the history both read the README now. A test that wants
+    # to see one says so; this default keeps the guard meaningful by making
+    # "no README" the explicit, ordinary case rather than a network call.
+    monkeypatch.setattr(github, "fetch_readme", lambda repo, max_chars=8000: "")
 
 
 def at(day, month=6, year=2026):
@@ -300,7 +304,7 @@ def test_the_history_note_is_written_as_agent_work(
     project, commit = repo_project
     commit("a", at(1, month=4), "add the portal", ["portal/auth.py"])
 
-    async def fake(timeline_text):
+    async def fake(timeline_text, **kw):
         assert "portal" in timeline_text  # it got the facts, not the question
         return {
             "what_it_is": "A management system for a services firm.",
@@ -335,7 +339,7 @@ def test_the_note_records_how_complete_the_history_was(
     commit("a", at(1), "detailed", ["src/a.py"])
     commit("b", at(2), "message only")
 
-    async def fake(timeline_text):
+    async def fake(timeline_text, **kw):
         return {"what_it_is": "Something."}
 
     monkeypatch.setattr(assistant, "summarise_history", fake)
@@ -357,7 +361,7 @@ def test_a_summary_read_from_history_is_proposed_not_applied(
     db.commit()
     commit("a", at(1), "work", ["src/a.py"])
 
-    async def fake(timeline_text):
+    async def fake(timeline_text, **kw):
         return {"what_it_is": "x", "suggested_summary": "What the history says it is."}
 
     monkeypatch.setattr(assistant, "summarise_history", fake)
@@ -380,13 +384,13 @@ def test_running_it_again_replaces_the_proposal(
     project, commit = repo_project
     commit("a", at(1), "work", ["src/a.py"])
 
-    async def first(timeline_text):
+    async def first(timeline_text, **kw):
         return {"what_it_is": "x", "suggested_summary": "First reading."}
 
     monkeypatch.setattr(assistant, "summarise_history", first)
     client.post(f"/ai/projects/{project.id}/history")
 
-    async def second(timeline_text):
+    async def second(timeline_text, **kw):
         return {"what_it_is": "x", "suggested_summary": "Second reading."}
 
     monkeypatch.setattr(assistant, "summarise_history", second)
@@ -535,7 +539,7 @@ def test_the_stored_note_carries_no_debris(
     project, commit = repo_project
     commit("a", at(1), "work", ["src/a.py"])
 
-    async def messy(timeline_text):
+    async def messy(timeline_text, **kw):
         return {
             "what_it_is": 'A management system."]',
             "observations": ['It stalled in May."]'],
