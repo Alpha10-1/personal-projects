@@ -481,3 +481,85 @@ def sync_feedback(
         "attributed": attributed,
         "skipped": len(candidates) - added,
     }
+
+
+# --- Discovering your own repos ---------------------------------------------
+
+
+def github_user() -> Optional[str]:
+    """Whose repos to list.
+
+    `PP_GITHUB_USER` if set. Otherwise the owner of a repo already mapped to a
+    project, which is almost always right and saves asking for something the
+    database already knows.
+    """
+    configured = (os.getenv("PP_GITHUB_USER") or "").strip()
+    return configured or None
+
+
+def owner_from_projects(db: Session) -> Optional[str]:
+    for repo in tracked_repos(db):
+        if "/" in repo:
+            return repo.split("/", 1)[0]
+    return None
+
+
+def fetch_user_repos(user: str, limit: int = 100) -> list[dict]:
+    """Every repo on an account, newest activity first.
+
+    With `GITHUB_TOKEN` set this uses `/user/repos`, which includes private
+    repos and anything the token can see. Without one it falls back to the
+    public listing for that username -- fewer repos, but no setup.
+    """
+    token = os.getenv("GITHUB_TOKEN")
+    with httpx.Client(base_url=API_ROOT, headers=_headers(), timeout=TIMEOUT) as client:
+        if token:
+            path = "/user/repos"
+            params: dict[str, Any] = {
+                "per_page": min(limit, 100),
+                "sort": "updated",
+                "affiliation": "owner,collaborator",
+            }
+        else:
+            path = f"/users/{user}/repos"
+            params = {"per_page": min(limit, 100), "sort": "updated"}
+
+        response = client.get(path, params=params)
+        _raise_for_github(response, user)
+        return response.json()
+
+
+def to_repo_summary(payload: dict) -> dict:
+    """The fields worth showing when choosing what to import."""
+    return {
+        "full_name": payload.get("full_name"),
+        "name": payload.get("name"),
+        "description": payload.get("description"),
+        "language": payload.get("language"),
+        "private": bool(payload.get("private")),
+        "fork": bool(payload.get("fork")),
+        "archived": bool(payload.get("archived")),
+        "stars": payload.get("stargazers_count", 0),
+        "url": payload.get("html_url"),
+        "topics": payload.get("topics") or [],
+        "pushed_at": _parse_time(payload.get("pushed_at")),
+        "created_at": _parse_time(payload.get("created_at")),
+    }
+
+
+def fetch_readme(repo: str, max_chars: int = 8000) -> str:
+    """A repo's README as text, or "" if it has none.
+
+    Used to plan the work that is *left* on an existing project. A missing
+    README is ordinary, not an error -- half of anyone's repos have none.
+    """
+    headers = {**_headers(), "Accept": "application/vnd.github.raw"}
+    try:
+        with httpx.Client(base_url=API_ROOT, headers=headers, timeout=TIMEOUT) as client:
+            response = client.get(f"/repos/{repo}/readme")
+            if response.status_code == 404:
+                return ""
+            _raise_for_github(response, repo)
+            return response.text[:max_chars]
+    except (httpx.HTTPError, RuntimeError):
+        return ""

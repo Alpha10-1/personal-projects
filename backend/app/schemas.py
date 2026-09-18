@@ -36,6 +36,7 @@ NoNull = AfterValidator(_reject_null)
 ProjectStatus = Literal["idea", "planning", "active", "on_hold", "done", "archived"]
 ProjectCategory = Literal["research", "build", "analysis", "learning", "ops", "other"]
 Priority = Literal["low", "medium", "high"]
+Workspace = Literal["work", "personal"]
 TaskStatus = Literal["todo", "in_progress", "blocked", "done"]
 MilestoneStatus = Literal["pending", "done"]
 TimeCategory = Literal["research", "build", "analysis", "meeting", "learning", "admin", "other"]
@@ -62,6 +63,7 @@ class ProjectCreate(BaseModel):
     stakeholder: Optional[str] = None
     tech_stack: Optional[str] = None
     repo: Optional[str] = Field(default=None, max_length=255)
+    workspace: Workspace = "work"
     progress_override: Optional[int] = Field(default=None, ge=0, le=100)
     retro: Optional[str] = None
 
@@ -81,6 +83,7 @@ class ProjectUpdate(BaseModel):
     stakeholder: Optional[str] = None
     tech_stack: Optional[str] = None
     repo: Optional[str] = Field(default=None, max_length=255)
+    workspace: Annotated[Optional[Workspace], NoNull] = None
     progress_override: Optional[int] = Field(default=None, ge=0, le=100)
     retro: Optional[str] = None
 
@@ -100,6 +103,7 @@ class ProjectOut(ORMModel):
     stakeholder: Optional[str]
     tech_stack: Optional[str]
     repo: Optional[str]
+    workspace: Workspace
     progress_override: Optional[int]
     retro: Optional[str]
     created_at: Optional[datetime]

@@ -32,8 +32,13 @@ def list_projects(
     priority: Optional[str] = None,
     q: Optional[str] = None,
     include_archived: bool = False,
+    workspace: Optional[str] = None,
 ):
     stmt = select(models.Project)
+    # Omitted means "everything", so existing callers and the MCP tools are
+    # unaffected; the personal page asks for one side explicitly.
+    if workspace:
+        stmt = stmt.where(models.Project.workspace == workspace)
     if not include_archived and status != "archived":
         stmt = stmt.where(models.Project.archived_at.is_(None))
     if status:
@@ -163,6 +168,14 @@ def delete_project(project_id: int, db: Session = Depends(get_db)):
         ).scalars():
             child.parent_task_id = None
         db.flush()
+
+    # A brainstorm outlives the project it was filed under: it is your
+    # thinking, and the project going away does not unthink it.
+    for session in db.execute(
+        select(models.Brainstorm).where(models.Brainstorm.project_id == project_id)
+    ).scalars():
+        session.project_id = None
+    db.flush()
 
     # Time logs, notes, links and files reference only the project. Tasks
     # reference milestones, so they go before them, and the project last.

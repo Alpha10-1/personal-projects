@@ -19,7 +19,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, time, timedelta
 from typing import Any, Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app import models, transitions
@@ -79,14 +79,34 @@ def _hours_by_task(db: Session) -> dict[int, float]:
 # --- Findings ---------------------------------------------------------------
 
 
+def _open_tasks(db: Session) -> list[models.Task]:
+    """Open tasks the analyst is allowed to comment on.
+
+    Personal projects are out of scope by design: a side project you touch
+    every few months is not "stalled", and a review that says it is trains
+    you to ignore the ones that matter. A task with no project at all is
+    still in scope -- it is unfiled, not personal.
+    """
+    personal = select(models.Project.id).where(models.Project.workspace == "personal")
+    return list(
+        db.execute(
+            select(models.Task).where(
+                models.Task.status != "done",
+                or_(
+                    models.Task.project_id.is_(None),
+                    models.Task.project_id.not_in(personal),
+                ),
+            )
+        ).scalars()
+    )
+
+
 def find(db: Session, stale_days: int = STALE_DAYS) -> list[Finding]:
     """Everything worth a second look, newest concern first."""
     today = date.today()
     findings: list[Finding] = []
 
-    open_tasks = list(
-        db.execute(select(models.Task).where(models.Task.status != "done")).scalars()
-    )
+    open_tasks = _open_tasks(db)
     activity = _last_activity(db)
     logs = _last_time_log(db)
     hours = _hours_by_task(db)
@@ -167,6 +187,7 @@ def find(db: Session, stale_days: int = STALE_DAYS) -> list[Finding]:
             select(models.Project).where(
                 models.Project.archived_at.is_(None),
                 models.Project.status.in_(("active", "planning")),
+                models.Project.workspace != "personal",
             )
         ).scalars()
     )
@@ -267,9 +288,7 @@ def propose(db: Session) -> list[models.Suggestion]:
         db.add(suggestion)
         created.append(suggestion)
 
-    open_tasks = list(
-        db.execute(select(models.Task).where(models.Task.status != "done")).scalars()
-    )
+    open_tasks = _open_tasks(db)
 
     for task in open_tasks:
         merged = _merged_pr_for(db, task.id)

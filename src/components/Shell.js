@@ -17,6 +17,7 @@ import {
   Stethoscope,
   Users,
   Sunrise,
+  Sparkles,
   X,
 } from "lucide-react";
 
@@ -27,6 +28,7 @@ const NAV = [
   { href: "/time", label: "Time", icon: Timer },
   { href: "/library", label: "Library", icon: BookMarked },
   { href: "/insights", label: "Insights", icon: BarChart3 },
+  { href: "/personal", label: "Personal", icon: Sparkles },
   { href: "/people", label: "People", icon: Users },
   { href: "/review", label: "Review", icon: Stethoscope },
 ];

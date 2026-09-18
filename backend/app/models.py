@@ -33,6 +33,9 @@ def utcnow():
 # entered by hand -- the moment those blur, none of the numbers mean anything.
 SOURCES = ("human", "agent")
 
+# Which side of the app a project belongs to.
+WORKSPACES = ("work", "personal")
+
 
 def source_column():
     return Column(String(10), nullable=False, default="human", index=True)
@@ -70,6 +73,12 @@ class Project(Base):
     # "owner/name" on GitHub. Activity in this repo is attributed to this
     # project, which is the cheapest linkage that is actually reliable.
     repo = Column(String(255), nullable=True, index=True)
+
+    # work | personal. Personal projects are deliberately outside the
+    # analyst's reach: no findings, no suggestion rules, no scheduled run.
+    # A hobby repo you touch every few months is not "stalled", and a system
+    # that says it is teaches you to ignore it.
+    workspace = Column(String(20), nullable=False, default="work", index=True)
 
     # Manually set 0-100. Kept alongside the task-derived percentage rather
     # than replacing it, because early-stage work often has real progress and
@@ -386,3 +395,39 @@ class Feedback(Base):
     status = Column(String(20), nullable=False, default="open", index=True)
     resolved_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=utcnow)
+
+
+# --- Brainstorming ----------------------------------------------------------
+
+
+class Brainstorm(Base):
+    """A saved thinking session about an idea.
+
+    Separate from the chat floater, which is deliberately throwaway. A
+    brainstorm is kept because the interesting part is usually the third
+    exchange, not the first, and because what comes out of it should be able
+    to become a project without retyping it.
+    """
+
+    __tablename__ = "brainstorms"
+
+    id = Column(Integer, primary_key=True)
+    # Optional: the best ideas start before there is a project to file under.
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+
+    topic = Column(String(255), nullable=False)
+    created_at = Column(DateTime, default=utcnow, index=True)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class BrainstormMessage(Base):
+    __tablename__ = "brainstorm_messages"
+
+    id = Column(Integer, primary_key=True)
+    brainstorm_id = Column(
+        Integer, ForeignKey("brainstorms.id"), nullable=False, index=True
+    )
+    # user | assistant
+    role = Column(String(20), nullable=False)
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=utcnow, index=True)

@@ -141,13 +141,13 @@ export function useLiveSuggestions({ kind, draft, projectId, enabled = true }) {
  * Server-Sent Events are parsed by hand rather than with EventSource, which
  * only does GET and so can't carry the conversation.
  */
-export async function streamChat({ messages, onDelta, signal }) {
+async function streamSSE(path, payload, { onDelta, signal }) {
   let response;
   try {
-    response = await fetch(`${API_URL}/ai/chat`, {
+    response = await fetch(`${API_URL}${path}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages }),
+      body: JSON.stringify(payload),
       signal,
       cache: "no-store",
     });
@@ -195,4 +195,19 @@ export async function streamChat({ messages, onDelta, signal }) {
       if (event === "error") throw new ApiError(parsed, 502);
     }
   }
+}
+
+/** The floater: a throwaway conversation, nothing persisted. */
+export function streamChat({ messages, onDelta, signal }) {
+  return streamSSE("/ai/chat", { messages }, { onDelta, signal });
+}
+
+/** A saved brainstorm. Only the new message is sent — the history is on the
+ *  server, which is what makes the session resumable from another tab. */
+export function streamBrainstorm({ brainstormId, content, onDelta, signal }) {
+  return streamSSE(
+    `/ai/brainstorms/${brainstormId}/turn`,
+    { content },
+    { onDelta, signal },
+  );
 }

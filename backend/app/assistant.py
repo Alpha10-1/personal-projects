@@ -558,3 +558,206 @@ async def write_digest(db: Session, project: models.Project) -> dict:
         model=ai.CHAT_MODEL,
         max_tokens=ai.MAX_REVIEW_TOKENS,
     )
+
+
+# --- Scaffolding a whole project --------------------------------------------
+
+SCAFFOLD_SYSTEM = (
+    "You turn an idea into a plan someone can start on tomorrow.\n\n"
+    "Rules:\n"
+    "- Milestones are outcomes you could report; tasks are single sittings of "
+    "work. If a task needs a paragraph to explain, it is two tasks.\n"
+    "- Task titles are imperative and concrete: 'Pull the shift data', not "
+    "'Data acquisition phase'.\n"
+    "- Estimate in hours, honestly. Most real tasks are 1-4 hours; if "
+    "something looks like 20, it has not been broken down.\n"
+    "- Order matters. The first task should be the one that makes the second "
+    "possible, and the plan should start with whatever would kill the idea "
+    "soonest if it turned out not to work.\n"
+    "- Do not invent scope. A small idea gets a small plan; five tasks that "
+    "are real beats fifteen that are padding.\n"
+    "- This is someone's own project, not a work deliverable. No governance "
+    "ceremony, no stakeholder sign-off, no risk register."
+)
+
+SCAFFOLD_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "name": {"type": "string", "description": "Short project name."},
+        "summary": {"type": "string", "description": "One or two sentences."},
+        "objective": {"type": "string", "description": "Why it is worth doing."},
+        "definition_of_done": {
+            "type": "string",
+            "description": "How you would know it is finished. Concrete.",
+        },
+        "category": {"type": "string", "enum": PROJECT_CATEGORIES},
+        "priority": {"type": "string", "enum": PRIORITIES},
+        "tech_stack": {"type": "string", "description": "Comma-separated tools."},
+        "milestones": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "detail": {"type": "string"},
+                },
+                "required": ["title"],
+            },
+            "maxItems": 6,
+        },
+        "tasks": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "notes": {"type": "string"},
+                    "estimate_hours": {"type": "number"},
+                    "priority": {"type": "string", "enum": PRIORITIES},
+                    "milestone": {
+                        "type": "string",
+                        "description": "Title of a milestone above that this belongs to.",
+                    },
+                },
+                "required": ["title"],
+            },
+            "maxItems": 25,
+        },
+        "first_step": {
+            "type": "string",
+            "description": "The single thing to do first, in one sentence.",
+        },
+    },
+    "required": ["name", "tasks"],
+}
+
+
+async def scaffold(idea: str, repo: Optional[dict] = None) -> dict:
+    """A whole project plan from a sentence, or from a repo."""
+    lines = [f"The idea: {ai.clip(idea, 2000)}"]
+    if repo:
+        lines.append("\nIt already exists as a repository:")
+        lines.append(f"  {repo.get('full_name')}")
+        if repo.get("description"):
+            lines.append(f"  description: {repo['description']}")
+        if repo.get("language"):
+            lines.append(f"  main language: {repo['language']}")
+        if repo.get("topics"):
+            lines.append(f"  topics: {', '.join(repo['topics'][:10])}")
+        if repo.get("readme"):
+            lines.append(f"\nREADME:\n{ai.clip(repo['readme'], 4000)}")
+        lines.append(
+            "\nPlan the work that is left, not the work already done. If the "
+            "README shows something is already built, do not make a task of it."
+        )
+    lines.append("\n" + _vocabulary_note())
+
+    return await ai.structured(
+        system=SCAFFOLD_SYSTEM,
+        prompt=ai.clip("\n".join(lines), ai.MAX_CONTEXT_CHARS * 2),
+        schema=SCAFFOLD_SCHEMA,
+        tool_name="scaffold",
+        model=ai.CHAT_MODEL,
+        max_tokens=ai.MAX_REVIEW_TOKENS,
+    )
+
+
+# --- Brainstorming ----------------------------------------------------------
+
+BRAINSTORM_SYSTEM = (
+    "You are thinking through an idea with someone, on their own personal "
+    "project. Not a work deliverable -- nobody is signing this off.\n\n"
+    "How to be useful:\n"
+    "- Have opinions. 'It depends' is not a contribution.\n"
+    "- Say what you would actually do, and why, then say what would change "
+    "your mind.\n"
+    "- Name the thing most likely to sink it, early, while it is still cheap "
+    "to change direction.\n"
+    "- Ask at most one question per turn, and only when the answer would "
+    "genuinely change your advice.\n"
+    "- Short. Two or three paragraphs at most, no headers, and no bullet "
+    "lists unless they are actually a list of things.\n"
+    "- Never open by restating what they said."
+)
+
+
+def brainstorm_system(db: Session, project: Optional[models.Project]) -> str:
+    """The brainstorm prompt, plus the project it is about if there is one."""
+    if project is None:
+        return BRAINSTORM_SYSTEM
+    lines = [
+        BRAINSTORM_SYSTEM,
+        "\n--- THE PROJECT THIS IS ABOUT ---",
+        f"{project.name} [{project.status}/{project.category}]",
+    ]
+    if project.summary:
+        lines.append(ai.clip(project.summary, 600))
+    if project.objective:
+        lines.append(f"Objective: {ai.clip(project.objective, 600)}")
+    if project.repo:
+        lines.append(f"Repo: {project.repo}")
+
+    tasks = list(
+        db.execute(
+            select(models.Task).where(models.Task.project_id == project.id).limit(30)
+        ).scalars()
+    )
+    if tasks:
+        lines.append("\nTasks already on it:")
+        for task in tasks:
+            lines.append(f"  - {task.title} [{task.status}]")
+    return "\n".join(lines)
+
+
+HARVEST_SYSTEM = (
+    "You are reading a brainstorm and pulling out what was actually decided.\n\n"
+    "Only what the conversation supports. If an idea was raised and then "
+    "argued against, it is not a task. If nothing was decided, return nothing "
+    "rather than inventing a plan -- an empty answer is the correct one for a "
+    "conversation that did not land anywhere."
+)
+
+HARVEST_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "tasks": {
+            "type": "array",
+            "description": "Concrete things the conversation actually settled on.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "notes": {"type": "string"},
+                    "estimate_hours": {"type": "number"},
+                },
+                "required": ["title"],
+            },
+            "maxItems": 15,
+        },
+        "decisions": {
+            "type": "array",
+            "description": "What was settled, as statements.",
+            "items": {"type": "string"},
+            "maxItems": 8,
+        },
+        "open": {
+            "type": "array",
+            "description": "What is still undecided.",
+            "items": {"type": "string"},
+            "maxItems": 6,
+        },
+    },
+}
+
+
+async def harvest(topic: str, messages: list[dict]) -> dict:
+    """Turn a conversation into tasks and decisions."""
+    transcript = "\n\n".join(f"{m['role'].upper()}: {m['content']}" for m in messages)
+    return await ai.structured(
+        system=HARVEST_SYSTEM,
+        prompt=ai.clip(f"Topic: {topic}\n\n{transcript}", ai.MAX_CONTEXT_CHARS * 2),
+        schema=HARVEST_SCHEMA,
+        tool_name="harvest",
+        model=ai.CHAT_MODEL,
+        max_tokens=ai.MAX_REVIEW_TOKENS,
+    )

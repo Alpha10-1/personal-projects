@@ -138,6 +138,18 @@ def no_outbound_http(monkeypatch, request):
             "fetcher, or mark the test with @pytest.mark.network."
         )
 
+    def refuse_repos(user, limit=100):
+        raise AssertionError(
+            f"Test tried to list {user}'s repos from GitHub. Patch "
+            "github.fetch_user_repos, or mark the test with @pytest.mark.network."
+        )
+
+    def refuse_readme(repo, max_chars=8000):
+        raise AssertionError(
+            f"Test tried to fetch {repo}'s README from GitHub. Patch "
+            "github.fetch_readme, or mark the test with @pytest.mark.network."
+        )
+
     def refuse_diffs(repo, shas, **kw):
         raise AssertionError(
             f"Test tried to fetch diffs for {repo} from GitHub. Patch "
@@ -154,6 +166,8 @@ def no_outbound_http(monkeypatch, request):
 
     monkeypatch.setattr(github, "fetch_from_github", refuse)
     monkeypatch.setattr(github, "fetch_comments", refuse_comments)
+    monkeypatch.setattr(github, "fetch_user_repos", refuse_repos)
+    monkeypatch.setattr(github, "fetch_readme", refuse_readme)
     monkeypatch.setattr(github, "fetch_diffs", refuse_diffs)
     # The model is guarded at the client rather than at structured()/stream(),
     # so a test that patches neither is caught instead of quietly billing.

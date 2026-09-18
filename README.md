@@ -232,6 +232,74 @@ what turns on activity ingestion, the two suggestion rules, and the Repo tab.
 
 ---
 
+## The personal side
+
+`/personal` is your own projects, separate from work. Same database, one
+discriminator (`Project.workspace`), and **the analyst does not come here** —
+no findings, no suggestion rules, nothing in the scheduled run. A side
+project you pick up every few months is not "stalled", and a review that says
+it is trains you to ignore the ones that matter.
+
+Everything already in the tracker still applies: tasks, time, notes, the repo
+tab, the chat floater.
+
+### Import your repos
+
+```bash
+curl "localhost:8000/personal/repos?user=your-login"
+curl -X POST localhost:8000/personal/repos/import   -H 'Content-Type: application/json'   -d '{"repos": ["you/weather_etl", "you/course-finder-app"]}'
+```
+
+Set `PP_GITHUB_USER` in `backend/.env` to stop passing `?user=`. Without
+`GITHUB_TOKEN` only public repos are listed; with one, private repos appear
+too. Already-imported repos are marked, and importing the same repo twice is
+a no-op — the obvious thing to do after importing five is to come back for
+the sixth.
+
+### From an idea to a full plan
+
+```bash
+curl -X POST localhost:8000/ai/scaffold   -H 'Content-Type: application/json'   -d '{"idea": "An app that tracks my runs and warns me when mileage ramps too fast"}'
+```
+
+Returns a project with milestones, tasks and hour estimates, and writes
+nothing. Add `"apply": true` to build it in one call instead — the UI has
+both, **Draft a plan** and **Just build it**. Pass `"repo": "you/name"` and it
+reads the README and plans the work that is *left*, not what is already done.
+
+Generated tasks are stamped `source: agent`, so a board filled in thirty
+seconds is still distinguishable from one you typed.
+
+`POST /ai/scaffold/apply` builds a plan you already have, after you have
+dropped the rows you did not want. No model call, so what gets created is
+exactly what was on screen.
+
+### Brainstorming
+
+Saved sessions, unlike the throwaway chat floater — because the useful part
+of a brainstorm is usually the third exchange, and because what comes out of
+one should become tasks without retyping it.
+
+```bash
+curl -X POST localhost:8000/personal/brainstorms   -H 'Content-Type: application/json' -d '{"topic": "Strava API or manual entry?"}'
+
+curl -X POST localhost:8000/ai/brainstorms/1/turn   -H 'Content-Type: application/json' -d '{"content": "Which should I do first?"}'
+
+curl -X POST localhost:8000/ai/brainstorms/1/harvest   -H 'Content-Type: application/json' -d '{"apply": true}'
+```
+
+The prompt tells it to have opinions and to name what would sink the idea
+early. **Harvest** pulls out what was actually decided — and returns nothing
+when nothing was, rather than inventing a plan from a conversation that did
+not land anywhere.
+
+Your message is saved before the model is called, so a failed or abandoned
+reply still leaves the question in the transcript. A brainstorm outlives the
+project it was filed under: deleting the project clears the link, not the
+thinking.
+
+---
+
 ## People and collaboration
 
 Other people can be linked to a project, either to be kept informed or
@@ -459,6 +527,7 @@ backend/
     github.py      fetching, translating and linking activity
     review.py      the deterministic rules: findings and suggestions
     collaboration.py  turning git history into named people
+    routes/personal.py  your own repos, imports and brainstorms
     share.py       the read-only snapshot you send someone
     ai.py          the model client -- the only thing that leaves the machine
     assistant.py   what the model is told, and what it is asked for

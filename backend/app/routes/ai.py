@@ -301,3 +301,291 @@ async def project_digest(project_id: int, db: Session = Depends(get_db)):
         "summary_suggested": summary_suggested,
         "proposed_summary": proposed if summary_suggested else None,
     }
+
+
+# --- Scaffolding -------------------------------------------------------------
+
+
+class ScaffoldRequest(BaseModel):
+    idea: str = Field(default="", description="A sentence or a paragraph.")
+    repo: Optional[str] = Field(
+        default=None, description="owner/name, to plan around existing code."
+    )
+    workspace: str = "personal"
+    apply: bool = Field(
+        default=False,
+        description="False returns the plan to look at; True creates it.",
+    )
+
+
+def _build(db: Session, plan: dict, workspace: str, repo: Optional[str]) -> models.Project:
+    """Turn a plan into real rows.
+
+    Milestones are created first so a task can point at one by title. A task
+    naming a milestone that isn't in the plan is filed under the project
+    alone rather than dropped -- losing a task to a typo in the model's own
+    output would be the worst possible failure here.
+    """
+    project = models.Project(
+        name=plan.get("name") or "Untitled",
+        summary=plan.get("summary"),
+        objective=plan.get("objective"),
+        definition_of_done=plan.get("definition_of_done"),
+        category=plan.get("category") or "build",
+        priority=plan.get("priority") or "medium",
+        tech_stack=plan.get("tech_stack"),
+        repo=repo,
+        workspace=workspace,
+        status="planning",
+    )
+    db.add(project)
+    db.flush()
+
+    by_title: dict[str, int] = {}
+    for position, milestone in enumerate(plan.get("milestones") or []):
+        title = (milestone.get("title") or "").strip()
+        if not title:
+            continue
+        row = models.Milestone(
+            project_id=project.id,
+            title=title[:255],
+            detail=milestone.get("detail"),
+            position=position,
+        )
+        db.add(row)
+        db.flush()
+        by_title[title.lower()] = row.id
+
+    for task in plan.get("tasks") or []:
+        title = (task.get("title") or "").strip()
+        if not title:
+            continue
+        named = (task.get("milestone") or "").strip().lower()
+        db.add(
+            models.Task(
+                project_id=project.id,
+                milestone_id=by_title.get(named),
+                title=title[:255],
+                notes=task.get("notes"),
+                estimate_hours=task.get("estimate_hours"),
+                priority=task.get("priority") or "medium",
+                source="agent",
+            )
+        )
+
+    db.commit()
+    db.refresh(project)
+    return project
+
+
+@router.post("/scaffold")
+async def scaffold(request: ScaffoldRequest, db: Session = Depends(get_db)):
+    """Turn an idea, or a repo, into a project with milestones and tasks.
+
+    Two modes on purpose. Without `apply` it returns the plan and writes
+    nothing, so you can read it first; with `apply` it builds the whole thing
+    in one go. Generated tasks are stamped `agent`, so a board filled in
+    thirty seconds is still distinguishable from one you typed.
+    """
+    _require_ai()
+    idea = request.idea.strip()
+    if not idea and not request.repo:
+        raise HTTPException(status_code=400, detail="Give an idea or a repo.")
+
+    repo_context = None
+    if request.repo:
+        repo_context = {"full_name": request.repo, "readme": github.fetch_readme(request.repo)}
+        if not idea:
+            idea = f"Continue the work on {request.repo}."
+
+    try:
+        plan = await assistant.scaffold(idea, repo_context)
+    except ai.AINotConfigured as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ai.AIFailed as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    if not request.apply:
+        return {"applied": False, "plan": plan}
+
+    project = _build(db, plan, request.workspace, request.repo)
+    return {
+        "applied": True,
+        "plan": plan,
+        "project_id": project.id,
+        "milestones_created": len(plan.get("milestones") or []),
+        "tasks_created": len(plan.get("tasks") or []),
+    }
+
+
+class ApplyPlanRequest(BaseModel):
+    """Building a plan the caller already has, after editing it."""
+
+    plan: dict
+    workspace: str = "personal"
+    repo: Optional[str] = None
+
+
+@router.post("/scaffold/apply")
+def apply_scaffold(request: ApplyPlanRequest, db: Session = Depends(get_db)):
+    """Create the rows for a plan already generated.
+
+    No model call: this is what the preview button posts back after you have
+    dropped the tasks you did not want, so it costs nothing and cannot come
+    back different from what you just read.
+    """
+    if not request.plan.get("name"):
+        raise HTTPException(status_code=400, detail="The plan needs a name.")
+    project = _build(db, request.plan, request.workspace, request.repo)
+    return {
+        "applied": True,
+        "project_id": project.id,
+        "milestones_created": len(request.plan.get("milestones") or []),
+        "tasks_created": len(request.plan.get("tasks") or []),
+    }
+
+
+# --- Brainstorming -----------------------------------------------------------
+
+
+class TurnRequest(BaseModel):
+    content: str = Field(min_length=1)
+
+
+@router.post("/brainstorms/{brainstorm_id}/turn")
+async def brainstorm_turn(
+    brainstorm_id: int, request: TurnRequest, db: Session = Depends(get_db)
+):
+    """One exchange in a saved brainstorm, streamed.
+
+    Both sides are persisted -- yours before the call, the reply as it
+    finishes. Saving yours first means a failed or abandoned call still
+    leaves the question in the transcript, which is the half worth keeping.
+    """
+    _require_ai()
+    session = db.get(models.Brainstorm, brainstorm_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Brainstorm not found")
+
+    db.add(
+        models.BrainstormMessage(
+            brainstorm_id=session.id, role="user", content=request.content
+        )
+    )
+    session.updated_at = models.utcnow()
+    db.commit()
+
+    history = list(
+        db.execute(
+            select(models.BrainstormMessage)
+            .where(models.BrainstormMessage.brainstorm_id == session.id)
+            .order_by(models.BrainstormMessage.created_at, models.BrainstormMessage.id)
+        ).scalars()
+    )
+    turns = [{"role": m.role, "content": m.content} for m in history]
+    project = db.get(models.Project, session.project_id) if session.project_id else None
+    system = assistant.brainstorm_system(db, project)
+
+    async def events():
+        collected: list[str] = []
+        try:
+            async for chunk in ai.stream(system=system, messages=turns):
+                collected.append(chunk)
+                yield ai.sse("delta", chunk)
+        except (ai.AIFailed, ai.AINotConfigured) as exc:
+            yield ai.sse("error", str(exc))
+
+        if collected:
+            # A fresh session: the request-scoped one is finished with by the
+            # time a stream drains, and writing through it raises.
+            from app.db import SessionLocal
+
+            writer = SessionLocal()
+            try:
+                writer.add(
+                    models.BrainstormMessage(
+                        brainstorm_id=brainstorm_id,
+                        role="assistant",
+                        content="".join(collected),
+                    )
+                )
+                row = writer.get(models.Brainstorm, brainstorm_id)
+                if row is not None:
+                    row.updated_at = models.utcnow()
+                writer.commit()
+            finally:
+                writer.close()
+        yield ai.sse("done", True)
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+class HarvestRequest(BaseModel):
+    apply: bool = False
+    project_id: Optional[int] = None
+
+
+@router.post("/brainstorms/{brainstorm_id}/harvest")
+async def brainstorm_harvest(
+    brainstorm_id: int, request: HarvestRequest, db: Session = Depends(get_db)
+):
+    """Pull the decisions and tasks out of a conversation.
+
+    The point of keeping a brainstorm is that the good part is usually the
+    third exchange; this is what stops it staying buried there.
+    """
+    _require_ai()
+    session = db.get(models.Brainstorm, brainstorm_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Brainstorm not found")
+
+    history = list(
+        db.execute(
+            select(models.BrainstormMessage)
+            .where(models.BrainstormMessage.brainstorm_id == session.id)
+            .order_by(models.BrainstormMessage.created_at, models.BrainstormMessage.id)
+        ).scalars()
+    )
+    if not history:
+        raise HTTPException(status_code=400, detail="Nothing said yet.")
+
+    try:
+        result = await assistant.harvest(
+            session.topic, [{"role": m.role, "content": m.content} for m in history]
+        )
+    except ai.AINotConfigured as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ai.AIFailed as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    created = 0
+    target = request.project_id or session.project_id
+    if request.apply and result.get("tasks"):
+        if target is None:
+            raise HTTPException(
+                status_code=400,
+                detail="No project to add these to. Pass project_id.",
+            )
+        if db.get(models.Project, target) is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        for task in result["tasks"]:
+            title = (task.get("title") or "").strip()
+            if not title:
+                continue
+            db.add(
+                models.Task(
+                    project_id=target,
+                    title=title[:255],
+                    notes=task.get("notes"),
+                    estimate_hours=task.get("estimate_hours"),
+                    source="agent",
+                )
+            )
+            created += 1
+        db.commit()
+
+    return {**result, "applied": request.apply, "tasks_created": created, "project_id": target}
