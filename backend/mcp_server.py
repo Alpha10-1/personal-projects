@@ -62,7 +62,17 @@ server = MCPServer(
         "when the user has decided -- present the rationale and ask.\n\n"
         "When writing, say what you changed and why. Task status drives "
         "completed_at and therefore the cycle-time figures, so do not mark "
-        "work done unless the user said it is done."
+        "work done unless the user said it is done.\n\n"
+        "People, feedback and dashboards hang off projects: `project_team` is "
+        "the whole picture of who worked on one. `project_timeline` is the "
+        "computed history of a linked repository -- what changed, where and "
+        "when -- and is the right place to answer 'what is this project' or "
+        "'when did X start' from, because it is arithmetic over recorded "
+        "commits rather than a guess.\n\n"
+        "The tracker has its own assistant for drafting and chat. Those "
+        "endpoints are deliberately not exposed here: you are the model, so "
+        "you are given the facts to reason over instead of a second model to "
+        "ask."
     ),
 )
 
@@ -568,6 +578,297 @@ async def accept_suggestion(suggestion_id: int) -> dict:
 )
 async def dismiss_suggestion(suggestion_id: int) -> dict:
     return await _call("POST", f"/suggestions/{suggestion_id}/dismiss")
+
+
+# --- How a project was built ------------------------------------------------
+
+
+@server.tool(
+    description=(
+        "The computed history of a project's repository: commits per month "
+        "with the areas they touched, when each part of the tree first and "
+        "last changed, the most-changed files, and who committed. Arithmetic "
+        "over recorded commits, not an opinion -- answer questions about what "
+        "a project is, when something started, or what has been abandoned "
+        "from this, and cite the month or file you got it from. `detailed` "
+        "says how many of the commits have file-level detail; the rest are "
+        "known only by their message until deep_sync_commits has run."
+    ),
+    annotations=READS,
+)
+async def project_timeline(project_id: int) -> dict:
+    return await _call("GET", f"/ai/projects/{project_id}/timeline")
+
+
+@server.tool(
+    description=(
+        "Fetch which files each commit changed, for commits that don't have "
+        "that yet. Costs one GitHub request per commit, so it runs newest "
+        "first in chunks; `still_missing` in the reply says whether there is "
+        "more to fetch. Run it when project_timeline reports fewer detailed "
+        "commits than total."
+    ),
+    annotations=WRITES,
+)
+async def deep_sync_commits(repo: Optional[str] = None, limit: int = 60) -> list:
+    return await _call(
+        "POST", "/activity/deep-sync", params={"repo": repo, "limit": limit}
+    )
+
+
+# --- People and collaboration -----------------------------------------------
+
+
+@server.tool(
+    description=(
+        "People on record: collaborators, reviewers and contributors, with "
+        "their GitHub login and how much of the activity is theirs."
+    ),
+    annotations=READS,
+)
+async def list_people(include_archived: bool = False) -> list:
+    return await _call(
+        "GET", "/people", params={"include_archived": include_archived}
+    )
+
+
+@server.tool(
+    description=(
+        "Add someone to the address book. A `github_login` is what links "
+        "their commits and pull requests to them -- without it they are a "
+        "name with no contributions attached. Adding one re-attributes their "
+        "existing history immediately."
+    ),
+    annotations=WRITES,
+)
+async def add_person(
+    name: str,
+    github_login: Optional[str] = None,
+    email: Optional[str] = None,
+    role_title: Optional[str] = None,
+    notes: Optional[str] = None,
+) -> dict:
+    return await _call(
+        "POST",
+        "/people",
+        body=_prune(
+            {
+                "name": name,
+                "github_login": github_login,
+                "email": email,
+                "role_title": role_title,
+                "notes": notes,
+            }
+        ),
+    )
+
+
+@server.tool(
+    description=(
+        "Who worked on a project, in one call: the people linked to it and "
+        "their roles, every login that has committed to it with how much and "
+        "how recently, and the feedback recorded against it. Use this rather "
+        "than assembling it from list_people and list_activity."
+    ),
+    annotations=READS,
+)
+async def project_team(project_id: int) -> dict:
+    return await _call("GET", f"/projects/{project_id}/collaboration")
+
+
+@server.tool(
+    description=(
+        "Link a person to a project. `role` is viewer, contributor or "
+        "reviewer -- viewer means they are shown the progress, the other two "
+        "mean their work is expected to appear in it."
+    ),
+    annotations=WRITES,
+)
+async def add_member(project_id: int, person_id: int, role: Optional[str] = None) -> dict:
+    return await _call(
+        "POST",
+        f"/projects/{project_id}/members",
+        body=_prune({"person_id": person_id, "role": role}),
+    )
+
+
+@server.tool(
+    description=(
+        "What people have said: review comments, issue comments and notes "
+        "typed by hand. `status` is open (the default), addressed, declined "
+        "or all. These are the suggestions git never records."
+    ),
+    annotations=READS,
+)
+async def list_feedback(
+    project_id: Optional[int] = None,
+    person_id: Optional[int] = None,
+    status: str = "open",
+    limit: int = 100,
+) -> list:
+    return await _call(
+        "GET",
+        "/feedback",
+        params={
+            "project_id": project_id,
+            "person_id": person_id,
+            "status": status,
+            "limit": limit,
+        },
+    )
+
+
+@server.tool(
+    description=(
+        "Record something a person said that GitHub will never see -- a "
+        "remark in a meeting, a suggestion over a call. It is stored as "
+        "manually entered, so it is never mistaken for a real review comment."
+    ),
+    annotations=WRITES,
+)
+async def add_feedback(
+    body: str,
+    project_id: Optional[int] = None,
+    person_id: Optional[int] = None,
+    url: Optional[str] = None,
+) -> dict:
+    return await _call(
+        "POST",
+        "/feedback",
+        body=_prune(
+            {
+                "body": body,
+                "project_id": project_id,
+                "person_id": person_id,
+                "url": url,
+            }
+        ),
+    )
+
+
+@server.tool(
+    description=(
+        "Change a piece of feedback: mark it addressed or declined, or attach "
+        "it to the right person or project. Only mark something addressed "
+        "when the work it asked for has actually been done."
+    ),
+    annotations=WRITES,
+)
+async def update_feedback(
+    feedback_id: int,
+    status: Optional[str] = None,
+    person_id: Optional[int] = None,
+    project_id: Optional[int] = None,
+) -> dict:
+    body = _prune(
+        {"status": status, "person_id": person_id, "project_id": project_id}
+    )
+    if not body:
+        raise ToolError("Nothing to update: pass at least one field to change.")
+    return await _call("PATCH", f"/feedback/{feedback_id}", body=body)
+
+
+# --- Your GitHub account ----------------------------------------------------
+
+
+@server.tool(
+    description=(
+        "Every repository on the user's GitHub account, whether or not it is "
+        "a project here -- `imported` says which are already tracked. The "
+        "account is worked out automatically. Results are cached for a few "
+        "minutes; this call spends GitHub quota, and `rate_limit` in the "
+        "reply says how much is left."
+    ),
+    annotations=READS,
+)
+async def list_repos(user: Optional[str] = None, limit: int = 100) -> dict:
+    return await _call("GET", "/personal/repos", params={"user": user, "limit": limit})
+
+
+@server.tool(
+    description=(
+        "Create a personal project for each repository named, as "
+        "\"owner/name\". Anything already tracked is skipped, so importing "
+        "the same list twice adds nothing."
+    ),
+    annotations=WRITES,
+)
+async def import_repos(repos: list[str], status: Optional[str] = None) -> list:
+    if not repos:
+        raise ToolError("Pass at least one repo, as owner/name.")
+    return await _call(
+        "POST", "/personal/repos/import", body=_prune({"repos": repos, "status": status})
+    )
+
+
+@server.tool(
+    description=(
+        "Saved brainstorms: their topic, the project they belong to and how "
+        "many turns each has. Transcripts are not included -- read one with "
+        "read_brainstorm."
+    ),
+    annotations=READS,
+)
+async def list_brainstorms(project_id: Optional[int] = None, limit: int = 50) -> list:
+    return await _call(
+        "GET", "/personal/brainstorms", params={"project_id": project_id, "limit": limit}
+    )
+
+
+@server.tool(
+    description="One brainstorm in full, with its transcript in order.",
+    annotations=READS,
+)
+async def read_brainstorm(brainstorm_id: int) -> dict:
+    return await _call("GET", f"/personal/brainstorms/{brainstorm_id}")
+
+
+# --- Dashboards -------------------------------------------------------------
+
+
+@server.tool(
+    description=(
+        "Reports and dashboards, whether pasted in by hand or mirrored from "
+        "the Power BI Service, with their refresh state where it is known. "
+        "`unlinked_only` returns the ones not attached to a project."
+    ),
+    annotations=READS,
+)
+async def list_dashboards(
+    project_id: Optional[int] = None, unlinked_only: bool = False, limit: int = 200
+) -> list:
+    return await _call(
+        "GET",
+        "/dashboards",
+        params={
+            "project_id": project_id,
+            "unlinked_only": unlinked_only,
+            "limit": limit,
+        },
+    )
+
+
+@server.tool(
+    description=(
+        "Record a report and optionally attach it to a project. A Power BI "
+        "URL is recognised, so a later sync updates this row rather than "
+        "adding a second one for the same report."
+    ),
+    annotations=WRITES,
+)
+async def add_dashboard(
+    name: str,
+    url: Optional[str] = None,
+    project_id: Optional[int] = None,
+    note: Optional[str] = None,
+) -> dict:
+    return await _call(
+        "POST",
+        "/dashboards",
+        body=_prune(
+            {"name": name, "url": url, "project_id": project_id, "note": note}
+        ),
+    )
 
 
 if __name__ == "__main__":

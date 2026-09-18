@@ -224,3 +224,243 @@ async def test_an_unreachable_api_says_so_plainly(monkeypatch, tmp_path):
 
     with pytest.raises(ToolError, match="Is the backend running"):
         await mcp_server.today()
+
+
+# --- How a project was built ------------------------------------------------
+
+
+@pytest.fixture
+def repo_project(make):
+    """A project with a repo and two commits, one of them detailed."""
+    project = make.project(name="OMS", repo="me/oms")
+    make.event(
+        repo="me/oms",
+        external_id="aaa",
+        title="add the search module",
+        occurred_at=datetime(2026, 7, 4, 12, 0),
+        project_id=project.id,
+        actor="me",
+        raw=json.dumps({"sha": "aaa"}),
+        file_stats=json.dumps(
+            {
+                "files": [
+                    {
+                        "path": "backend/app/search.py",
+                        "status": "added",
+                        "additions": 90,
+                        "deletions": 0,
+                    }
+                ],
+                "additions": 90,
+                "deletions": 0,
+            }
+        ),
+    )
+    make.event(
+        repo="me/oms",
+        external_id="bbb",
+        title="tidy up",
+        occurred_at=datetime(2026, 8, 9, 12, 0),
+        project_id=project.id,
+        actor="me",
+        raw=json.dumps({"sha": "bbb"}),
+    )
+    return project
+
+
+@pytest.mark.anyio
+async def test_the_timeline_is_the_arithmetic_of_the_history(mcp, repo_project):
+    body = await mcp.project_timeline(project_id=repo_project.id)
+
+    assert body["commits"] == 2
+    assert [p["month"] for p in body["periods"]] == ["2026-07", "2026-08"]
+    assert "backend/app" in {a["area"] for a in body["areas"]}
+
+
+@pytest.mark.anyio
+async def test_the_timeline_says_how_much_detail_it_has(mcp, repo_project):
+    """A summary built from 1 of 2 commits is a different claim from one built
+    on both, so the agent is told which it is holding."""
+    body = await mcp.project_timeline(project_id=repo_project.id)
+
+    assert body["commits"] == 2
+    assert body["detailed"] == 1
+
+
+@pytest.mark.anyio
+async def test_a_project_with_no_repo_says_so_rather_than_returning_nothing(mcp, make):
+    make.project(name="No repo")
+
+    with pytest.raises(ToolError, match="isn't linked to a repo"):
+        await mcp.project_timeline(project_id=1)
+
+
+@pytest.mark.anyio
+async def test_deep_sync_fills_in_the_missing_detail(mcp, repo_project, monkeypatch):
+    from app import github
+
+    monkeypatch.setattr(
+        github,
+        "fetch_commit_stats",
+        lambda repo, shas: {
+            sha: {"files": [{"path": "README.md", "additions": 1, "deletions": 0}],
+                  "additions": 1, "deletions": 0}
+            for sha in shas
+        },
+    )
+
+    result = await mcp.deep_sync_commits(repo="me/oms")
+
+    assert result[0]["fetched"] == 1
+    assert result[0]["still_missing"] == 0
+    assert (await mcp.project_timeline(project_id=repo_project.id))["detailed"] == 2
+
+
+# --- People and collaboration -----------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_a_person_added_with_a_login_picks_up_their_existing_work(mcp, make):
+    """Adding someone who has been committing for weeks should show those
+    weeks, not start them from zero."""
+    project = make.project(name="OMS", repo="me/oms")
+    make.event(repo="me/oms", external_id="c1", project_id=project.id, actor="dana")
+
+    person = await mcp.add_person(name="Dana", github_login="dana")
+
+    assert person["contributions"] == 1
+
+
+@pytest.mark.anyio
+async def test_project_team_gathers_members_contributors_and_feedback(mcp, make):
+    project = make.project(name="OMS", repo="me/oms")
+    make.event(repo="me/oms", external_id="c1", project_id=project.id, actor="dana")
+    person = await mcp.add_person(name="Dana", github_login="dana")
+    await mcp.add_member(project_id=project.id, person_id=person["id"], role="reviewer")
+    await mcp.add_feedback(
+        body="The export should stream, not buffer.",
+        project_id=project.id,
+        person_id=person["id"],
+    )
+
+    team = await mcp.project_team(project_id=project.id)
+
+    assert [m["role"] for m in team["members"]] == ["reviewer"]
+    assert [c["login"] for c in team["contributors"]] == ["dana"]
+    assert team["feedback_open"] == 1
+
+
+@pytest.mark.anyio
+async def test_feedback_typed_in_cannot_claim_to_be_a_review_comment(mcp):
+    """The other sources mean "this came from GitHub and has an id there"."""
+    item = await mcp.add_feedback(body="Said in standup: drop the CSV path.")
+
+    assert item["source"] == "manual"
+
+
+@pytest.mark.anyio
+async def test_feedback_can_be_closed_once_it_is_dealt_with(mcp):
+    item = await mcp.add_feedback(body="Rename the column.")
+
+    await mcp.update_feedback(feedback_id=item["id"], status="addressed")
+
+    assert await mcp.list_feedback() == []
+    assert len(await mcp.list_feedback(status="addressed")) == 1
+
+
+@pytest.mark.anyio
+async def test_an_empty_feedback_update_is_refused_before_it_reaches_the_api(mcp):
+    item = await mcp.add_feedback(body="Something.")
+
+    with pytest.raises(ToolError, match="Nothing to update"):
+        await mcp.update_feedback(feedback_id=item["id"])
+
+
+# --- The GitHub account -----------------------------------------------------
+
+
+def _repo_payload(full_name="me/oms", **kw):
+    return {
+        "full_name": full_name,
+        "name": full_name.split("/")[-1],
+        "description": "An organisation management system",
+        "language": "Python",
+        "html_url": f"https://github.com/{full_name}",
+        **kw,
+    }
+
+
+@pytest.mark.anyio
+async def test_repos_are_listed_with_whether_they_are_already_tracked(
+    mcp, make, monkeypatch
+):
+    from app import github
+
+    make.project(name="OMS", repo="me/oms")
+    monkeypatch.setattr(
+        github,
+        "fetch_user_repos",
+        lambda user, limit=100, **kw: [_repo_payload(), _repo_payload("me/other")],
+    )
+
+    body = await mcp.list_repos(user="me")
+
+    assert {r["full_name"]: r["imported"] for r in body["repos"]} == {
+        "me/oms": True,
+        "me/other": False,
+    }
+
+
+@pytest.mark.anyio
+async def test_importing_the_same_repo_twice_adds_nothing(mcp, monkeypatch):
+    from app import github
+
+    monkeypatch.setattr(
+        github, "fetch_user_repos", lambda user, limit=100, **kw: [_repo_payload()]
+    )
+
+    first = await mcp.import_repos(repos=["me/oms"])
+    second = await mcp.import_repos(repos=["me/oms"])
+
+    assert [p["repo"] for p in first] == ["me/oms"]
+    assert second == []
+    assert len(await mcp.list_projects()) == 1
+
+
+@pytest.mark.anyio
+async def test_importing_nothing_is_refused_before_it_reaches_the_api(mcp):
+    with pytest.raises(ToolError, match="at least one repo"):
+        await mcp.import_repos(repos=[])
+
+
+@pytest.mark.anyio
+async def test_a_brainstorm_is_listed_without_its_transcript_and_read_with_it(
+    mcp, client
+):
+    session = client.post(
+        "/personal/brainstorms", json={"topic": "Where to take the tracker"}
+    ).json()
+
+    listed = await mcp.list_brainstorms()
+    read = await mcp.read_brainstorm(brainstorm_id=session["id"])
+
+    assert [s["topic"] for s in listed] == ["Where to take the tracker"]
+    assert listed[0]["messages"] == []
+    assert read["id"] == session["id"]
+
+
+# --- Dashboards -------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_a_dashboard_can_be_recorded_and_found_by_project(mcp, make):
+    project = make.project(name="OMS")
+    await mcp.add_dashboard(
+        name="Delivery", url="https://example.com/report", project_id=project.id
+    )
+    await mcp.add_dashboard(name="Loose", url="https://example.com/other")
+
+    assert [d["name"] for d in await mcp.list_dashboards(project_id=project.id)] == [
+        "Delivery"
+    ]
+    assert [d["name"] for d in await mcp.list_dashboards(unlinked_only=True)] == ["Loose"]
