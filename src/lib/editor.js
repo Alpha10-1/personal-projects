@@ -120,40 +120,110 @@ export const syntaxTheme = HighlightStyle.define([
   { tag: tags.strong, fontWeight: "600" },
 ]);
 
-/** Chrome: gutters, cursor, selection, and the surface it all sits on. */
-export const editorTheme = EditorView.theme({
-  "&": {
-    backgroundColor: "var(--surface-1)",
-    color: "var(--text-primary)",
-    fontSize: "12px",
-  },
-  ".cm-content": {
-    fontFamily:
-      "ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace",
-    caretColor: "var(--text-primary)",
-  },
-  ".cm-gutters": {
-    backgroundColor: "var(--surface-1)",
-    color: "var(--text-muted)",
-    border: "none",
-    borderRight: "1px solid var(--border)",
-  },
-  ".cm-activeLine": { backgroundColor: "var(--surface-2)" },
-  ".cm-activeLineGutter": {
-    backgroundColor: "var(--surface-2)",
-    color: "var(--text-secondary)",
-  },
-  "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection": {
-    backgroundColor: "var(--syn-selection)",
-  },
-  ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--text-primary)" },
-  ".cm-searchMatch": {
-    backgroundColor: "color-mix(in srgb, var(--warning) 35%, transparent)",
-  },
-  "&.cm-editor.cm-focused": { outline: "none" },
-});
+/**
+ * Chrome: the surface, the gutter, the cursor and the selection.
+ *
+ * Built per mode rather than once, because CodeMirror needs to be *told*
+ * whether it is dark -- the `dark` flag drives its own contrast decisions
+ * in extensions this theme does not reach. The colours themselves are still
+ * custom properties, so the two themes differ only in that flag.
+ *
+ * It must also be passed as `theme={...}` with the wrapper's own
+ * `theme="none"`. `@uiw/react-codemirror` defaults to `theme="light"`,
+ * which appends `{"&": {backgroundColor: "#fff"}}` *after* everything
+ * else -- which is why this editor was white in dark mode however many
+ * times the background was set here.
+ */
+function chrome(dark) {
+  return EditorView.theme(
+    {
+      "&": {
+        backgroundColor: "var(--surface-1)",
+        color: "var(--text-primary)",
+        fontSize: "13px",
+      },
+      ".cm-scroller": {
+        backgroundColor: "var(--surface-1)",
+        fontFamily:
+          "ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace",
+        lineHeight: "1.5",
+      },
+      ".cm-content": { caretColor: "var(--text-primary)", padding: "6px 0" },
 
-export const extensions = [editorTheme, syntaxHighlighting(syntaxTheme)];
+      // No border down the gutter: VS Code has none, and the line is the
+      // single thing that most makes an embedded editor look embedded.
+      ".cm-gutters": {
+        backgroundColor: "var(--surface-1)",
+        color: "var(--editor-line-number)",
+        border: "none",
+        paddingRight: "4px",
+      },
+      ".cm-lineNumbers .cm-gutterElement": { padding: "0 8px 0 16px" },
+      ".cm-activeLineGutter": {
+        backgroundColor: "transparent",
+        color: "var(--editor-line-number-active)",
+      },
+      ".cm-foldGutter .cm-gutterElement": { color: "var(--text-muted)" },
+
+      ".cm-activeLine": { backgroundColor: "var(--editor-active-line)" },
+
+      // The selection has to be set on all four of these or it comes out
+      // as the browser default in one state or another.
+      "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection, .cm-line ::selection":
+        { backgroundColor: "var(--syn-selection)" },
+      // Other occurrences of whatever is selected, as VS Code shows them.
+      ".cm-selectionMatch": {
+        backgroundColor: "var(--editor-selection-match)",
+      },
+
+      ".cm-cursor, .cm-dropCursor": {
+        borderLeftColor: "var(--text-primary)",
+        borderLeftWidth: "2px",
+      },
+
+      // A box rather than a highlight, which is what VS Code draws.
+      "&.cm-focused .cm-matchingBracket, .cm-matchingBracket": {
+        backgroundColor: "transparent",
+        outline: "1px solid var(--editor-bracket)",
+      },
+      ".cm-nonmatchingBracket": { outline: "1px solid var(--syn-invalid)" },
+
+      ".cm-panels": {
+        backgroundColor: "var(--editor-panel)",
+        color: "var(--text-primary)",
+        border: "none",
+      },
+      ".cm-panels input, .cm-panels button": {
+        backgroundColor: "var(--surface-1)",
+        color: "var(--text-primary)",
+        border: "1px solid var(--border)",
+        borderRadius: "3px",
+      },
+      ".cm-searchMatch": {
+        backgroundColor: "color-mix(in srgb, var(--warning) 35%, transparent)",
+      },
+      ".cm-searchMatch.cm-searchMatch-selected": {
+        backgroundColor: "color-mix(in srgb, var(--warning) 60%, transparent)",
+      },
+
+      ".cm-foldPlaceholder": {
+        backgroundColor: "var(--surface-2)",
+        color: "var(--text-muted)",
+        border: "1px solid var(--border)",
+      },
+      "&.cm-editor.cm-focused": { outline: "none" },
+    },
+    { dark },
+  );
+}
+
+export const lightChrome = chrome(false);
+export const darkChrome = chrome(true);
+
+/** Everything the editor needs, for the mode it is being shown in. */
+export function themeFor(isDark) {
+  return [isDark ? darkChrome : lightChrome, syntaxHighlighting(syntaxTheme)];
+}
 
 /**
  * Turn a CodeMirror selection into 1-based line numbers.

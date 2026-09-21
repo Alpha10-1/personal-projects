@@ -35,24 +35,41 @@ const FILE = {
   editor_url: "vscode://file/x/core.py",
 };
 
-const EXPLANATION = {
-  path: "core.py",
-  start_line: 4,
-  end_line: 5,
-  enclosing: { name: "fetch", kind: "function", signature: "def fetch():", line: 4 },
-  defines: [],
-  shared_values: [{ name: "MAX", kind: "constant", line: 1 }],
-  imports_used: [],
-  consequences: [
-    { level: "watch", text: "Changing fetch affects 2 other file(s): a.py, b.py" },
-    { level: "good", text: "1 test file(s) mention fetch: tests/test_core.py" },
-  ],
-  limits: ["Read from the repository by pattern and text search, not by a model."],
+// The shape the model route returns: measured facts, plus prose written
+// from them.
+const EXPLAINED = {
+  facts: {
+    path: "core.py",
+    start_line: 4,
+    end_line: 5,
+    enclosing: { name: "fetch", kind: "function", signature: "def fetch():", line: 4 },
+    defines: [],
+    shared_values: [{ name: "MAX", kind: "constant", line: 1 }],
+    imports_used: [],
+    references: {},
+    consequences: [
+      { level: "watch", text: "Changing fetch affects 2 other file(s): a.py, b.py" },
+    ],
+    limits: ["Found by pattern matching, not by parsing."],
+  },
+  explanation: {
+    summary: "Returns the capped rows.",
+    walkthrough: [],
+    role_in_the_system: "Called by `a.py`.",
+    shared_state: "Reads `MAX`.",
+    if_you_change_it: ["`a.py` would break."],
+    watch_out: [],
+    unknowns: [],
+  },
+  model: "claude-sonnet-5",
+  cached: false,
+  reason: null,
 };
 
-function server({ file = FILE, explanation = EXPLANATION } = {}) {
-  vi.mocked(api.get).mockImplementation((path) =>
-    Promise.resolve(path.endsWith("/explain") ? explanation : file),
+function server({ file = FILE, explained = EXPLAINED } = {}) {
+  vi.mocked(api.get).mockResolvedValue(file);
+  vi.mocked(api.post).mockImplementation((path) =>
+    Promise.resolve(path.endsWith("/explain") ? explained : { id: 12 }),
   );
 }
 
@@ -162,26 +179,38 @@ describe("the Explain button", () => {
     expect(await screen.findByRole("button", { name: /Explain lines 4–5/ })).toBeInTheDocument();
   });
 
-  it("asks the backend for those lines and shows the answer", async () => {
+  it("asks the model for those lines and shows what it wrote", async () => {
     await mount();
     selectLines(10, 30);
     await userEvent.click(await screen.findByRole("button", { name: /Explain/i }));
 
-    expect(api.get).toHaveBeenCalledWith("/projects/3/code/explain", {
+    expect(api.post).toHaveBeenCalledWith("/projects/3/code/explain", {
       path: "core.py",
       start_line: 4,
       end_line: 5,
+      refresh: false,
     });
-    expect(await screen.findByText(/Inside the function/)).toBeInTheDocument();
-    expect(screen.getByText(/affects 2 other file\(s\)/)).toBeInTheDocument();
+    expect(await screen.findByText("Returns the capped rows.")).toBeInTheDocument();
+    expect(screen.getByText("If you change it")).toBeInTheDocument();
   });
 
-  it("shows the shared values the selection reads", async () => {
+  it("keeps the measured facts underneath as evidence", async () => {
     await mount();
     selectLines(10, 30);
     await userEvent.click(await screen.findByRole("button", { name: /Explain/i }));
-    expect(await screen.findByText("Shared with other files")).toBeInTheDocument();
-    expect(screen.getByText("MAX")).toBeInTheDocument();
+    expect(await screen.findByText("What this was read from")).toBeInTheDocument();
+    expect(screen.getByText(/affects 2 other file\(s\)/)).toBeInTheDocument();
+  });
+
+  it("can be asked again, and says so explicitly in the request", async () => {
+    await mount();
+    selectLines(10, 30);
+    await userEvent.click(await screen.findByRole("button", { name: /Explain/i }));
+    await userEvent.click(await screen.findByLabelText("Ask again"));
+    expect(api.post).toHaveBeenLastCalledWith(
+      "/projects/3/code/explain",
+      expect.objectContaining({ refresh: true }),
+    );
   });
 
   it("disappears again when the selection is cleared", async () => {

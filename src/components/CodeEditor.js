@@ -24,8 +24,8 @@ import {
 } from "lucide-react";
 
 import { api } from "@/lib/api";
-import { useAsync } from "@/lib/hooks";
-import { extensions, languageFor, languageName, selectedLines } from "@/lib/editor";
+import { useAsync, useIsDark } from "@/lib/hooks";
+import { languageFor, languageName, selectedLines, themeFor } from "@/lib/editor";
 import { Badge, Button, Card, ErrorNote, Spinner } from "@/components/ui";
 import ExplainPanel from "@/components/ExplainPanel";
 
@@ -56,20 +56,32 @@ export default function CodeEditor({ project, path, onRaised, onOpenInEditor }) 
   const dirty = draft !== null && draft !== onDisk;
 
   const language = useMemo(() => languageFor(path), [path]);
+  // The editor has to be told which mode it is in: the colours come from
+  // custom properties and follow the cascade, but CodeMirror's own `dark`
+  // flag does not, and extensions this theme does not reach read it.
+  const isDark = useIsDark();
+  const theme = useMemo(() => themeFor(isDark), [isDark]);
 
   const onUpdate = useCallback((viewUpdate) => {
     if (!viewUpdate.selectionSet && !viewUpdate.docChanged) return;
     setSelection(selectedLines(viewUpdate.state));
   }, []);
 
-  const askExplain = async () => {
-    if (!selection) return;
+  // Holds the lines the open explanation is about, so "ask again" does not
+  // depend on the selection still being there -- reading the answer moves
+  // the cursor, which would otherwise clear it.
+  const [asked, setAsked] = useState(null);
+
+  const askExplain = async (lines, refresh = false) => {
+    if (!lines) return;
+    setAsked(lines);
     setExplain({ result: null, loading: true, error: null });
     try {
-      const result = await api.get(`/projects/${project.id}/code/explain`, {
+      const result = await api.post(`/projects/${project.id}/code/explain`, {
         path,
-        start_line: selection.from,
-        end_line: selection.to,
+        start_line: lines.from,
+        end_line: lines.to,
+        refresh,
       });
       setExplain({ result, loading: false, error: null });
     } catch (err) {
@@ -140,7 +152,8 @@ export default function CodeEditor({ project, path, onRaised, onOpenInEditor }) 
           value={value}
           height="30rem"
           editable={!readOnly}
-          extensions={[...extensions, ...language]}
+          theme="none"
+          extensions={[...theme, ...language]}
           onChange={setDraft}
           onUpdate={onUpdate}
           basicSetup={{
@@ -158,7 +171,7 @@ export default function CodeEditor({ project, path, onRaised, onOpenInEditor }) 
         {selection ? (
           <button
             type="button"
-            onClick={askExplain}
+            onClick={() => askExplain(selection)}
             className="absolute bottom-3 right-4 z-10 flex items-center gap-1.5 rounded-full border border-[var(--border-strong)] bg-[var(--surface-1)] px-3 py-1.5 text-xs font-medium shadow-lg hover:bg-[var(--accent-soft)] hover:text-[var(--accent)]"
           >
             <HelpCircle size={13} />
@@ -171,6 +184,7 @@ export default function CodeEditor({ project, path, onRaised, onOpenInEditor }) 
       {explain.result || explain.loading || explain.error ? (
         <ExplainPanel
           {...explain}
+          onRefresh={() => askExplain(asked, true)}
           onClose={() => setExplain({ result: null, loading: false, error: null })}
         />
       ) : null}

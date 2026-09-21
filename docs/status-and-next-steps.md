@@ -10,9 +10,9 @@ on its own.*
 
 | | |
 |---|---|
-| Backend tests | 813 passing, 3 deselected (network-marked) |
-| Frontend tests | 144 passing across 13 files |
-| Tables | 18 |
+| Backend tests | 831 passing, 3 deselected (network-marked) |
+| Frontend tests | 163 passing across 14 files |
+| Tables | 19 |
 | Projects | 5, all linked to a repo, all with a summary |
 | Commits ingested | 199, of which 197 have file-level detail |
 | Tasks / milestones / time logs | **0 / 0 / 0** |
@@ -91,7 +91,7 @@ Ordered by what I would actually do next.
 | | Effort | Why |
 |---|---|---|
 | **Point the remaining three projects at folders** | minutes each | Only `personal-projects` and `Organization_management_system` are checked out. `admin-dashboard`, `ride-native` and `course-finder-app` exist only on GitHub, so they have no Code tab. Clone them and set the folder in each brief. |
-| **Watch what agent runs cost** | ongoing | Spend went from $0.09 to $1.12 in one afternoon, almost all of it agent runs. A run is roughly $0.10--$0.15 with caching on. That is fine occasionally and not fine as a habit; the Spend page breaks it down by feature. |
+| **Watch what the model costs** | ongoing | Spend went from $0.09 to $1.12 in one afternoon, almost all of it agent runs. A run is roughly $0.10--$0.15 with caching on, and an Explain is $0.02 (cached against the file, so the second look is free). That is fine occasionally and not fine as a habit; the Spend page breaks it down by feature. |
 | **Consider a test-running tool** | ~half a day, and a real decision | The agent's honest weakness is that it cannot verify anything. A single fixed, project-configured command (not arbitrary shell) would let it check its own work. It is a meaningfully larger security surface than reading and writing files, which is why it was left out. |
 | **Frontend tests for `CodeWorkspace`** | ~1h | The file tree and the polling are the last untested part of the Code tab. |
 | **Set a leader on the other projects** | minutes | Only `personal-projects` has one. Without a leader, each change has to name its approver by hand. |

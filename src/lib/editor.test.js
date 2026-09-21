@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { languageFor, languageName, selectedLines, syntaxTheme } from "@/lib/editor";
+import {
+  darkChrome,
+  languageFor,
+  languageName,
+  lightChrome,
+  selectedLines,
+  syntaxTheme,
+  themeFor,
+} from "@/lib/editor";
 
 describe("choosing a language", () => {
   it("recognises the file types in these repositories", () => {
@@ -27,6 +35,20 @@ describe("choosing a language", () => {
 
   it("builds an extension for a known type", () => {
     expect(languageFor("app/main.py")).toHaveLength(1);
+  });
+});
+
+describe("the editor theme", () => {
+  it("hands back the dark chrome in dark mode and the light one otherwise", () => {
+    // The two differ only in CodeMirror's own `dark` flag; the colours are
+    // custom properties either way. This is what the white-background bug
+    // came down to, so it is worth asserting rather than assuming.
+    expect(themeFor(true)[0]).toBe(darkChrome);
+    expect(themeFor(false)[0]).toBe(lightChrome);
+  });
+
+  it("includes the syntax highlighting alongside the chrome", () => {
+    expect(themeFor(false)).toHaveLength(2);
   });
 });
 

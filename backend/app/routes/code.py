@@ -24,7 +24,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import agent, impact, models, workspace
+from app import agent, ai, explainer, impact, models, workspace
 from app.db import get_db
 
 router = APIRouter(tags=["code"])
@@ -424,10 +424,12 @@ def explain_selection(
     end_line: int = Query(..., ge=1),
     db: Session = Depends(get_db),
 ):
-    """What the highlighted lines are, and what depends on them.
+    """The measured facts about a selection: definitions, references, tests.
 
-    Deterministic and free: it reads the repository. No model is called, so
-    this can be asked as often as it is useful.
+    Free and instant, because it is a search over the repository. This is
+    what the model is grounded in, and it is also the answer when the model
+    is unavailable -- so it stays a route of its own rather than being
+    folded into the one below.
     """
     project = project_or_404(db, project_id)
     root = root_for(db, project)
@@ -435,3 +437,52 @@ def explain_selection(
         return impact.explain(root, path, start_line, end_line)
     except workspace.WorkspaceError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+class ExplainRequest(BaseModel):
+    path: str = Field(min_length=1, max_length=1024)
+    start_line: int = Field(ge=1)
+    end_line: int = Field(ge=1)
+    # Ask again for the same unchanged code. Off by default, because the
+    # whole point of the cache is that the second look is free.
+    refresh: bool = False
+
+
+@router.post("/projects/{project_id}/code/explain")
+async def explain_with_model(
+    project_id: int, body: ExplainRequest, db: Session = Depends(get_db)
+):
+    """The same facts, plus the model's reading of them.
+
+    A POST because it can spend money and write a row. Always returns the
+    facts, even when the model is not configured or the call fails -- the
+    deterministic half was useful before this existed and should not
+    disappear because the paid half is unavailable.
+    """
+    project = project_or_404(db, project_id)
+    try:
+        return await explainer.explain(
+            db,
+            project,
+            body.path,
+            body.start_line,
+            body.end_line,
+            refresh=body.refresh,
+        )
+    except workspace.WorkspaceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (ai.AINotConfigured, ai.AIFailed) as exc:
+        # The facts still exist, so answer with them and say why the rest
+        # is missing rather than failing the whole request.
+        root = root_for(db, project)
+        try:
+            facts = impact.explain(root, body.path, body.start_line, body.end_line)
+        except workspace.WorkspaceError as inner:
+            raise HTTPException(status_code=400, detail=str(inner)) from inner
+        return {
+            "facts": facts,
+            "explanation": None,
+            "model": None,
+            "cached": False,
+            "reason": str(exc),
+        }

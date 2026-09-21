@@ -680,3 +680,43 @@ class CodeChange(Base):
     base_sha = Column(String(40), nullable=True)
 
     created_at = Column(DateTime, default=utcnow, index=True)
+
+
+class CodeExplanation(Base):
+    """A model's explanation of one selection, kept so it is asked for once.
+
+    Keyed by a digest of the whole file rather than of the selected lines.
+    An explanation talks about the imports above it and the function it
+    sits in, so an edit elsewhere in the file can make a cached answer
+    wrong without changing a character inside the selection.
+
+    That the cache exists is what makes the button reasonable to press: the
+    second look at the same code is free, and the answer does not drift
+    between one reading and the next.
+    """
+
+    __tablename__ = "code_explanations"
+
+    id = Column(Integer, primary_key=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
+
+    path = Column(String(1024), nullable=False)
+    start_line = Column(Integer, nullable=False)
+    end_line = Column(Integer, nullable=False)
+    content_sha = Column(String(64), nullable=False, index=True)
+
+    payload_json = Column(Text, nullable=False)
+    model = Column(String(80), nullable=True)
+
+    created_at = Column(DateTime, default=utcnow, index=True)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id",
+            "path",
+            "start_line",
+            "end_line",
+            "content_sha",
+            name="uq_explanation_selection",
+        ),
+    )

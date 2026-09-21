@@ -544,29 +544,66 @@ rather than silently discarding whatever came after.
 #### Explain
 
 Select any code and an **Explain** button appears in the bottom corner. It
-reports what the selection is, what defines it, which other files mention
-it, which tests cover it, and which top-level values it reads -- because
-module scope is how these languages share anything, so "what else sees this
-value" is the whole of the question.
+answers in two halves, and the order matters.
 
-#### None of this calls a model
+**The measured half** is a search over the repository: the definition the
+selection sits in, every other file that mentions the names involved, which
+of those are tests, and which module-level values the selection reads --
+module scope being how these two languages share anything at all.
 
-The outline and Explain are regexes over source text and `git grep`. That
-makes them free, instant, repeatable, and checkable: "two files reference
-this" is either true or it is not, and both are named.
+**The written half** is the model, handed those facts and the code, and
+asked for the part that needs judgement: what it does, how it works step by
+step, why it is here, what breaks if you change it, and what is easy to
+miss.
 
-It also makes them approximate, and they say so. A name built at runtime, a
-dynamic import, a definition inside a conditional: none are found. A search
-matches a mention in a comment as readily as a call. And a name too common
-to search -- `read`, `path`, `status` -- returns **"I cannot tell you"**
-rather than a list of twenty-five irrelevant files, because the first real
-selection tried in anger reported exactly that and it was useless. A method
-carries a caveat that the search is by name, so another class with a method
-of the same name counts as a hit.
+The measured half exists to keep the written half honest. The model does
+not have to guess who calls something, because it was told; and it cannot
+invent a caller, because the callers are listed. Where the search could not
+run, the model is told *that* too, and instructed to report the blast
+radius as unknown rather than fill the gap. Asked about a method called
+`read`, it answered:
+
+> The caller name `read` was not searched (too common to find reliably), so
+> the blast radius of changing its signature or error behaviour is unknown
+> — treat call-site impact as unverified.
+
+Which is the right answer, and the one a model left to itself would not
+give.
+
+The facts stay on screen under the prose, collapsed, so any claim can be
+checked against what it was based on.
+
+**It is asked once.** An answer is cached against a digest of the whole
+file -- the whole file, not the selection, because the explanation talks
+about the imports above it too, and an edit elsewhere can make it wrong
+without changing a character inside. Pressing Explain again on unchanged
+code costs nothing and says *from cache*; there is a refresh button for
+when you want it asked again anyway. One explanation of a twenty-line
+method cost **$0.023**.
+
+Credential files are refused before anything is sent, on the same list the
+agent uses. Without a key, or with `PP_AI_EGRESS=off`, the measured half is
+returned on its own with the reason -- it was useful before the model was
+wired in and should not vanish because the paid half is unavailable.
+
+#### What the search cannot see
+
+The measured half is regex and `git grep`, so it is approximate and says
+so. A name built at runtime, a dynamic import, a definition inside a
+conditional: none are found. A search matches a mention in a comment as
+readily as a call. A name too common to search -- `read`, `path`, `status`
+-- returns **"I cannot tell you"** rather than a list of twenty-five
+irrelevant files, because the first real selection tried in anger reported
+exactly that and it was useless. A method carries a caveat that the search
+is by name, so another class with a method of the same name counts as a
+hit.
 
 Reporting "nothing references this" when the truth is "I did not look" is
 the one failure that would make the whole thing dangerous, so it is the one
 thing tested hardest.
+
+The **impact outline** on a change -- the other half of this, under Changes
+-- calls no model at all. It is shown on every row, so it has to stay free.
 
 ### Opening things in VS Code
 
@@ -949,6 +986,7 @@ backend/
     editor.py      handing a file to VS Code, by link or by CLI
     agent.py       the coding agent -- tools, overlay, protected paths
     impact.py      what a change reaches, and what a selection is
+    explainer.py   the model's reading of a selection, grounded and cached
     routes/code.py editing, approval, the outline and the undo
     ai.py          the model client -- the only thing that leaves the machine
     assistant.py   what the model is told, and what it is asked for

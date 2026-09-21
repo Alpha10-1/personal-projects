@@ -38,6 +38,15 @@
   --syn-operator: #000000;
   --syn-invalid: #d03b3b;
   --syn-selection: #add6ff;
+  /* Editor chrome, from VS Code Light+. Line numbers there are blue rather
+     than grey, which is a small thing that makes the gutter read as VS
+     Code's rather than as a generic editor's. */
+  --editor-line-number: #237893;
+  --editor-line-number-active: #0b216f;
+  --editor-active-line: rgb(0 0 0 / 0.04);
+  --editor-selection-match: #e4e4e4;
+  --editor-bracket: #b9b9b9;
+  --editor-panel: #f3f3f3;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -69,6 +78,13 @@
     --syn-operator: #d4d4d4;
     --syn-invalid: #f48771;
     --syn-selection: #264f78;
+    /* Dark+ equivalents. */
+    --editor-line-number: #858585;
+    --editor-line-number-active: #c6c6c6;
+    --editor-active-line: rgb(255 255 255 / 0.05);
+    --editor-selection-match: #3a3d41;
+    --editor-bracket: #888888;
+    --editor-panel: #252526;
 
 
     --good: #0ca30c;
@@ -106,6 +122,13 @@
   --syn-operator: #d4d4d4;
   --syn-invalid: #f48771;
   --syn-selection: #264f78;
+  /* Dark+ equivalents. */
+  --editor-line-number: #858585;
+  --editor-line-number-active: #c6c6c6;
+  --editor-active-line: rgb(255 255 255 / 0.05);
+  --editor-selection-match: #3a3d41;
+  --editor-bracket: #888888;
+  --editor-panel: #252526;
 }
 
 @theme inline {
