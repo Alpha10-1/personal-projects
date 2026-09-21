@@ -718,6 +718,15 @@ npm run build
 
 ---
 
+## What is left to do
+
+[`docs/status-and-next-steps.md`](docs/status-and-next-steps.md) is the
+running list: what is built, what is missing, what is known to be wrong,
+and the permissions an IT administrator would need to grant for the Power
+BI and AI pieces. Its last section is written to be sent on its own.
+
+---
+
 ## Where your data lives
 
 Everything is in `backend/data/`:
