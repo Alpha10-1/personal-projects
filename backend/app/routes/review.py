@@ -17,18 +17,33 @@ from app.db import get_db
 router = APIRouter(tags=["review"])
 
 
+def _titles(db: Session, suggestions) -> dict[tuple[str, int], str]:
+    """What each suggestion is about, by name rather than by number.
+
+    Keyed by type *and* id: task 8 and project 8 are different things, and a
+    single id-keyed map quietly showed one's name against the other.
+
+    Projects were missing entirely, so every suggestion raised against one --
+    which is all of the summary proposals -- read as "project 8" on the
+    Review page.
+    """
+    found: dict[tuple[str, int], str] = {}
+    for target_type, model, column in (
+        ("task", models.Task, models.Task.title),
+        ("project", models.Project, models.Project.name),
+    ):
+        ids = {s.target_id for s in suggestions if s.target_type == target_type}
+        if not ids:
+            continue
+        for row_id, title in db.execute(
+            select(model.id, column).where(model.id.in_(ids))
+        ).all():
+            found[(target_type, row_id)] = title
+    return found
+
+
 def _serialize(db: Session, suggestions):
-    task_ids = {s.target_id for s in suggestions if s.target_type == "task"}
-    titles = {}
-    if task_ids:
-        titles = {
-            row[0]: row[1]
-            for row in db.execute(
-                select(models.Task.id, models.Task.title).where(
-                    models.Task.id.in_(task_ids)
-                )
-            ).all()
-        }
+    titles = _titles(db, suggestions)
     out = []
     for s in suggestions:
         try:
@@ -52,7 +67,7 @@ def _serialize(db: Session, suggestions):
                 status=s.status,
                 created_at=s.created_at,
                 resolved_at=s.resolved_at,
-                target_title=titles.get(s.target_id),
+                target_title=titles.get((s.target_type, s.target_id)),
             )
         )
     return out
@@ -161,3 +176,86 @@ def dismiss(suggestion_id: int, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(suggestion)
     return _serialize(db, [suggestion])[0]
+
+
+# --- One suggestion, in full -------------------------------------------------
+
+# What a rule is actually looking for, in the words someone deciding would
+# use. The rule name is kept visible beside it -- it is what you would switch
+# off if the rule turned out to be noisy -- but on its own it explains
+# nothing to anyone who has not read review.py.
+RULE_EXPLANATIONS = {
+    "activity_suggests_started": (
+        "There are commits against a task that is still marked as not started, "
+        "so the work looks like it is already underway."
+    ),
+    "merged_pr_suggests_done": (
+        "A merged pull request names this task, which usually means the work "
+        "it describes has landed."
+    ),
+    "history_summary": (
+        "The whole commit history of the linked repository was read, and the "
+        "project's summary does not describe what the commits show was built."
+    ),
+}
+
+# Accepting writes to the tracker, so it is worth saying plainly what it will
+# write and where, rather than leaving it to be inferred from a field name.
+APPLIES = {
+    ("project", "summary"): "Replaces this project's summary with the proposed text.",
+    ("task", "status"): (
+        "Moves this task to the proposed status, exactly as changing it by "
+        "hand would -- including stamping its completion time if it becomes "
+        "done."
+    ),
+}
+
+
+def _live_value(db: Session, suggestion: models.Suggestion):
+    """What the field holds right now, and whether the target still exists.
+
+    The stored `current_value` is a snapshot from when the suggestion was
+    raised and may be weeks old. Deciding from it means deciding against
+    something that is no longer there -- and accepting overwrites whatever is
+    there *now*, not what the snapshot says.
+    """
+    model = {"project": models.Project, "task": models.Task}.get(suggestion.target_type)
+    if model is None:
+        return None, False
+    target = db.get(model, suggestion.target_id)
+    if target is None:
+        return None, False
+    value = getattr(target, suggestion.field, None)
+    return (None if value is None else str(value)), True
+
+
+@router.get("/suggestions/{suggestion_id}", response_model=schemas.SuggestionDetailOut)
+def get_suggestion(suggestion_id: int, db: Session = Depends(get_db)):
+    """Everything behind one suggestion, for reading before deciding.
+
+    The list view has to fit a row; a 240-character proposed summary does
+    not. This returns the same suggestion with nothing abbreviated, plus the
+    three things the list cannot show: what the field holds now, whether that
+    has changed since the suggestion was raised, and what accepting would
+    actually do.
+    """
+    suggestion = db.get(models.Suggestion, suggestion_id)
+    if suggestion is None:
+        raise HTTPException(status_code=404, detail="Suggestion not found")
+
+    base = _serialize(db, [suggestion])[0]
+    live, exists = _live_value(db, suggestion)
+    stored = suggestion.current_value or ""
+
+    return schemas.SuggestionDetailOut(
+        **base.model_dump(),
+        live_value=live,
+        target_exists=exists,
+        # Compared against the snapshot so the UI can warn before an accept
+        # quietly overwrites an edit made since.
+        changed_since_raised=exists and (live or "") != stored,
+        already_applied=exists and (live or "") == suggestion.proposed_value,
+        rule_explanation=RULE_EXPLANATIONS.get(suggestion.rule),
+        applies=APPLIES.get((suggestion.target_type, suggestion.field)),
+        can_apply=(suggestion.target_type, suggestion.field) in APPLIES,
+    )

@@ -1,10 +1,11 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { Check, RefreshCw, Stethoscope, X } from "lucide-react";
+import { Check, Eye, RefreshCw, Stethoscope, X } from "lucide-react";
 
 import { api } from "@/lib/api";
 import { useAsync } from "@/lib/hooks";
+import SuggestionDetail from "@/components/SuggestionDetail";
 import {
   Badge,
   Button,
@@ -50,6 +51,7 @@ function Finding({ finding }) {
 function Suggestion({ suggestion, onResolve }) {
   const [busy, setBusy] = useState(null);
   const [error, setError] = useState(null);
+  const [showing, setShowing] = useState(false);
 
   const resolve = async (decision) => {
     setBusy(decision);
@@ -73,17 +75,19 @@ function Suggestion({ suggestion, onResolve }) {
           <p className="mt-0.5 text-xs text-[var(--text-muted)]">
             {suggestion.rationale}
           </p>
-          <p className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs">
-            <span className="text-[var(--text-muted)]">{suggestion.field}</span>
-            <Badge tone="neutral">{suggestion.current_value || "unset"}</Badge>
-            <span aria-hidden className="text-[var(--text-muted)]">
-              &rarr;
+          <div className="mt-1.5 text-xs">
+            <span className="text-[var(--text-muted)]">{suggestion.field}</span>{" "}
+            <span className="text-[var(--text-muted)]">&rarr;</span>{" "}
+            <span className="line-clamp-2 align-top text-[var(--text-primary)]">
+              {suggestion.proposed_value}
             </span>
-            <Badge tone="info">{suggestion.proposed_value}</Badge>
-          </p>
+          </div>
         </div>
 
         <div className="flex shrink-0 gap-2">
+          <Button size="sm" onClick={() => setShowing(true)}>
+            <Eye size={13} /> View full suggestion
+          </Button>
           <Button
             variant="primary"
             size="sm"
@@ -115,6 +119,13 @@ function Suggestion({ suggestion, onResolve }) {
       ) : null}
 
       <ErrorNote error={error} onDismiss={() => setError(null)} />
+
+      <SuggestionDetail
+        suggestionId={suggestion.id}
+        open={showing}
+        onClose={() => setShowing(false)}
+        onResolved={onResolve}
+      />
     </div>
   );
 }

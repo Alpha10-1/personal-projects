@@ -361,6 +361,23 @@ class SuggestionOut(ORMModel):
     target_title: Optional[str] = None
 
 
+class SuggestionDetailOut(SuggestionOut):
+    """One suggestion, with what the list view has no room for.
+
+    `live_value` is read at request time rather than taken from the snapshot
+    stored when the rule fired, because that snapshot is what makes an old
+    suggestion misleading: accepting writes over whatever is there now.
+    """
+
+    live_value: Optional[str] = None
+    target_exists: bool = True
+    changed_since_raised: bool = False
+    already_applied: bool = False
+    rule_explanation: Optional[str] = None
+    applies: Optional[str] = None
+    can_apply: bool = True
+
+
 class ReviewOut(BaseModel):
     generated_at: datetime
     findings: list[FindingOut]

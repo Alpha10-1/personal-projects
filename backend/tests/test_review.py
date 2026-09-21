@@ -426,3 +426,183 @@ def test_a_suggestion_carries_the_task_title_and_evidence(client, db, make):
     assert row["target_title"] == "Tidy the loader"
     assert row["evidence"] and "Task: 1 tidy" in row["evidence"][0]
     assert row["rationale"]
+
+
+# --- Reading a suggestion before deciding on it ------------------------------
+
+
+def _summary_suggestion(db, project, proposed="A better summary.", current="Old."):
+    row = models.Suggestion(
+        rule="history_summary",
+        fingerprint=f"history_summary:project:{project.id}",
+        target_type="project",
+        target_id=project.id,
+        field="summary",
+        current_value=current,
+        proposed_value=proposed,
+        rationale="Read from the repository's whole commit history.",
+        evidence=json.dumps(["46 commits, Apr 2026 to Aug 2026"]),
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def test_a_suggestion_about_a_project_is_named_not_numbered(client, db, make):
+    """Every summary proposal read as "project 8" on the Review page, because
+    only task titles were ever looked up."""
+    project = make.project(name="admin-dashboard")
+    _summary_suggestion(db, project)
+
+    listed = client.get("/suggestions").json()
+
+    assert listed[0]["target_title"] == "admin-dashboard"
+
+
+def test_a_task_and_a_project_sharing_an_id_do_not_borrow_each_other_s_name(
+    client, db, make
+):
+    """Titles used to be keyed by id alone, so whichever was looked up last
+    won."""
+    project = make.project(name="the project")
+    task = make.task(title="the task")
+    assert project.id == task.id  # both are the first row in their table
+
+    _summary_suggestion(db, project)
+    db.add(
+        models.Suggestion(
+            rule="activity_suggests_started",
+            fingerprint="started:task:1",
+            target_type="task",
+            target_id=task.id,
+            field="status",
+            current_value="todo",
+            proposed_value="in_progress",
+            rationale="There are commits against it.",
+            evidence=json.dumps([]),
+        )
+    )
+    db.commit()
+
+    by_type = {s["target_type"]: s["target_title"] for s in client.get("/suggestions").json()}
+
+    assert by_type == {"project": "the project", "task": "the task"}
+
+
+def test_the_detail_shows_the_value_as_it_stands_now(client, db, make):
+    """The stored current value is a snapshot from when the rule fired.
+    Accepting overwrites what is there now, so that is what has to be read."""
+    project = make.project(name="OMS", summary="What it actually says today")
+    suggestion = _summary_suggestion(db, project, current="What it said back then")
+
+    body = client.get(f"/suggestions/{suggestion.id}").json()
+
+    assert body["live_value"] == "What it actually says today"
+    assert body["current_value"] == "What it said back then"
+    assert body["changed_since_raised"] is True
+
+
+def test_an_unchanged_target_is_not_flagged_as_drifted(client, db, make):
+    project = make.project(name="OMS", summary="Old.")
+    suggestion = _summary_suggestion(db, project, current="Old.")
+
+    body = client.get(f"/suggestions/{suggestion.id}").json()
+
+    assert body["changed_since_raised"] is False
+    assert body["already_applied"] is False
+
+
+def test_a_proposal_already_in_place_says_so(client, db, make):
+    project = make.project(name="OMS", summary="A better summary.")
+    suggestion = _summary_suggestion(db, project, proposed="A better summary.")
+
+    assert client.get(f"/suggestions/{suggestion.id}").json()["already_applied"] is True
+
+
+def test_a_deleted_target_is_reported_rather_than_left_to_fail_on_accept(
+    client, db, make
+):
+    project = make.project(name="Doomed")
+    suggestion = _summary_suggestion(db, project)
+    client.delete(f"/projects/{project.id}")
+
+    body = client.get(f"/suggestions/{suggestion.id}").json()
+
+    assert body["target_exists"] is False
+    assert body["live_value"] is None
+
+
+def test_the_detail_explains_the_rule_and_what_accepting_does(client, db, make):
+    project = make.project(name="OMS")
+    suggestion = _summary_suggestion(db, project)
+
+    body = client.get(f"/suggestions/{suggestion.id}").json()
+
+    assert "commit history" in body["rule_explanation"]
+    assert body["applies"] == "Replaces this project's summary with the proposed text."
+    assert body["can_apply"] is True
+
+
+def test_a_combination_nothing_knows_how_to_apply_admits_it(client, db, make):
+    """Better to say so before the button is pressed than to 400 afterwards."""
+    project = make.project(name="OMS")
+    db.add(
+        models.Suggestion(
+            rule="something_new",
+            fingerprint="x",
+            target_type="project",
+            target_id=project.id,
+            field="category",
+            current_value="build",
+            proposed_value="research",
+            rationale="why not",
+            evidence=json.dumps([]),
+        )
+    )
+    db.commit()
+    suggestion_id = client.get("/suggestions").json()[0]["id"]
+
+    body = client.get(f"/suggestions/{suggestion_id}").json()
+
+    assert body["can_apply"] is False
+    assert body["applies"] is None
+
+
+def test_nothing_is_abbreviated_in_the_detail(client, db, make):
+    """The whole point: the row could not show a 240-character summary."""
+    long_summary = "A. " * 80
+    project = make.project(name="OMS")
+    suggestion = _summary_suggestion(db, project, proposed=long_summary)
+
+    body = client.get(f"/suggestions/{suggestion.id}").json()
+
+    assert body["proposed_value"] == long_summary
+    assert body["evidence"] == ["46 commits, Apr 2026 to Aug 2026"]
+
+
+def test_reading_a_suggestion_changes_nothing(client, db, make):
+    project = make.project(name="OMS", summary="Untouched")
+    suggestion = _summary_suggestion(db, project)
+
+    client.get(f"/suggestions/{suggestion.id}")
+
+    assert client.get(f"/projects/{project.id}").json()["summary"] == "Untouched"
+    assert db.get(models.Suggestion, suggestion.id).status == "pending"
+
+
+def test_an_already_decided_suggestion_can_still_be_read(client, db, make):
+    """Accept and dismiss refuse a resolved suggestion; reading one is how you
+    check what you agreed to."""
+    project = make.project(name="OMS")
+    suggestion = _summary_suggestion(db, project)
+    client.post(f"/suggestions/{suggestion.id}/dismiss")
+
+    body = client.get(f"/suggestions/{suggestion.id}").json()
+
+    assert body["status"] == "dismissed"
+    assert body["resolved_at"]
+
+
+def test_an_unknown_suggestion_is_a_404(client):
+    assert client.get("/suggestions/999").status_code == 404
