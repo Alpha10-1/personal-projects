@@ -24,6 +24,8 @@ import time
 from collections.abc import AsyncIterator
 from typing import Any, Optional
 
+from app import privacy
+
 # Live suggestions are asked for on a pause in typing, so latency is the
 # constraint and Haiku is the right trade. Chat and repo review are deliberate
 # actions where the answer's quality matters more than a second of waiting.
@@ -79,19 +81,31 @@ def api_key() -> str:
 
 
 def is_configured() -> bool:
-    return bool(api_key())
+    """Whether the assistant can run at all.
+
+    Two conditions, not one: there has to be a key, and egress has to be
+    permitted. Folding the second in here rather than checking it separately
+    at each route is what makes it hold -- every route and the whole UI
+    already key off this one answer.
+    """
+    return bool(api_key()) and privacy.egress_allowed()
 
 
 def status() -> dict:
     """What the frontend needs to decide whether to offer any of this."""
     configured = is_configured()
+    if not privacy.egress_allowed():
+        reason = privacy.blocked_reason()
+    elif not api_key():
+        reason = "ANTHROPIC_API_KEY is not set, so the assistant is switched off."
+    else:
+        reason = None
     return {
         "configured": configured,
         "fast_model": FAST_MODEL if configured else None,
         "chat_model": CHAT_MODEL if configured else None,
-        "reason": None
-        if configured
-        else "ANTHROPIC_API_KEY is not set, so the assistant is switched off.",
+        "reason": reason,
+        **privacy.state(),
     }
 
 
@@ -102,8 +116,15 @@ def _client(timeout: float = REQUEST_TIMEOUT):
     The timeout is per call because the jobs differ by an order of magnitude:
     a suggestion that takes a minute is broken, while a research call that
     runs five searches legitimately takes several.
+
+    This is also the one gate on data leaving the machine. Every call to the
+    model is built here, so a route that forgets to ask permission still
+    cannot send anything -- the check is structural rather than a convention
+    each new feature has to remember.
     """
-    if not is_configured():
+    if not privacy.egress_allowed():
+        raise AINotConfigured(privacy.blocked_reason())
+    if not api_key():
         raise AINotConfigured(
             "ANTHROPIC_API_KEY is not set. Put it in backend/.env to switch the "
             "assistant on."

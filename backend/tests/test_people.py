@@ -573,6 +573,9 @@ def test_a_missing_project_has_no_snapshot(client):
 @pytest.fixture
 def configured(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-not-a-real-key")
+    # Egress is off by default, so a test that exercises the assistant has to
+    # say it means to -- the same deliberate step the user takes.
+    monkeypatch.setenv("PP_AI_EGRESS", "on")
 
 
 def fake_digest(result):

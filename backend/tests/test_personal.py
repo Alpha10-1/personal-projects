@@ -19,6 +19,9 @@ from app import models
 @pytest.fixture
 def configured(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-not-a-real-key")
+    # Egress is off by default, so a test that exercises the assistant has to
+    # say it means to -- the same deliberate step the user takes.
+    monkeypatch.setenv("PP_AI_EGRESS", "on")
 
 
 def repo_payload(name="weather_etl", owner="Alpha10-1", **kw):

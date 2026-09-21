@@ -258,6 +258,9 @@ async def test_research_is_passed_through_as_opinion_rather_than_fact(monkeypatc
 @pytest.fixture
 def configured(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-not-a-real-key")
+    # Egress is off by default, so a test that exercises the assistant has to
+    # say it means to -- the same deliberate step the user takes.
+    monkeypatch.setenv("PP_AI_EGRESS", "on")
 
 
 PLAN_RESULT = {
@@ -462,6 +465,7 @@ def test_planning_an_unknown_project_is_a_404(client, configured):
 
 
 def test_planning_needs_a_key(client, project, monkeypatch):
+    monkeypatch.setenv("PP_AI_EGRESS", "on")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
     response = client.post(f"/ai/projects/{project.id}/plan", json={})

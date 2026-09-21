@@ -16,6 +16,9 @@ from app import ai, assistant, github
 @pytest.fixture
 def configured(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-not-a-real-key")
+    # Egress is off by default, so a test that exercises the assistant has to
+    # say it means to -- the same deliberate step the user takes.
+    monkeypatch.setenv("PP_AI_EGRESS", "on")
     # The review and the history both read the README now. A test that wants
     # to see one says so; this default keeps the guard meaningful by making
     # "no README" the explicit, ordinary case rather than a network call.
@@ -25,7 +28,10 @@ def configured(monkeypatch):
 
 @pytest.fixture
 def unconfigured(monkeypatch):
+    """No key, but egress permitted -- so what is being tested is the missing
+    key rather than the privacy switch, which has its own tests."""
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("PP_AI_EGRESS", "on")
     return True
 
 
