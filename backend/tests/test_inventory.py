@@ -306,3 +306,60 @@ def test_a_kept_gap_carries_the_warning(repo, wordy):
     [kept] = result["gaps"]
     assert kept["verified"] is True
     assert "protected_patterns" in kept["possibly_related"]
+
+
+# --- not discarding a real gap -------------------------------------------
+#
+# The other direction of the same failure. On a real run, "add
+# authentication" was discarded because `auth` appears in a comment, in a
+# glob pattern and inside an SDK error string -- so a genuine gap went
+# unreported. Exact matches against the inventory are trustworthy at four
+# characters; a free-text grep is not.
+
+
+def test_a_short_word_is_not_grepped_for(repo):
+    """`auth` in a comment is not authentication."""
+    write(repo / "app" / "notes.py", "# auth is handled elsewhere, one day\n")
+    run_git(repo, "add", "-A")
+    run_git(repo, "-c", "user.email=t@e.com", "-c", "user.name=T", "commit", "-m", "note")
+    built = inventory.index(repo)
+    assert inventory.already_there(repo, "auth", built) is None
+
+
+def test_a_long_enough_term_still_is(repo):
+    write(repo / "app" / "notes.py", "def authenticate_user():\n    pass\n")
+    run_git(repo, "add", "-A")
+    run_git(repo, "-c", "user.email=t@e.com", "-c", "user.name=T", "commit", "-m", "auth")
+    built = inventory.index(repo)
+    assert inventory.already_there(repo, "authenticate_user", built) is not None
+
+
+def test_a_mention_only_in_documentation_is_not_an_implementation(repo):
+    """The README describing what is missing must not prove it is present."""
+    write(repo / "ROADMAP.md", "We should add rate_limiting one day.\n")
+    run_git(repo, "add", "-A")
+    run_git(repo, "-c", "user.email=t@e.com", "-c", "user.name=T", "commit", "-m", "docs")
+    built = inventory.index(repo)
+    assert inventory.already_there(repo, "rate_limiting", built) is None
+
+
+def test_the_same_term_in_source_does_count(repo):
+    """Not a definition, so this exercises the grep path rather than the
+    exact-match one above it."""
+    write(repo / "app" / "guard.py", "HEADERS = {'x-rate-limiting': '1'}\n")
+    run_git(repo, "add", "-A")
+    run_git(repo, "-c", "user.email=t@e.com", "-c", "user.name=T", "commit", "-m", "real")
+    built = inventory.index(repo)
+    assert "app/guard.py" in inventory.already_there(repo, "rate-limiting", built)
+
+
+def test_an_exact_inventory_match_is_still_trusted_at_four_characters(repo):
+    """The floor only applies to grepping. A name that *is* a definition
+    here is unambiguous however short."""
+    write(repo / "app" / "tiny.py", "def prep():\n    pass\n")
+    run_git(repo, "add", "-A")
+    run_git(repo, "-c", "user.email=t@e.com", "-c", "user.name=T", "commit", "-m", "tiny")
+    built = inventory.index(repo)
+    assert inventory.already_there(repo, "prep", built) == (
+        "`prep` is already defined in this repository"
+    )

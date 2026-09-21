@@ -261,3 +261,20 @@ def test_local_path_round_trips_through_the_api(client, make, repo):
     ).json()
     assert patched["local_path"] == str(repo)
     assert client.get(f"/projects/{project.id}/workspace").json()["available"] is True
+
+
+def test_search_can_require_whole_words(repo):
+    """`export` inside `exported` is not a match worth acting on: it was
+    enough to make the survey conclude a CSV export already existed."""
+    write(repo / "flags.py", "exported = True\n")
+    run(repo, "add", "-A")
+    run(repo, "-c", "user.email=t@e.com", "-c", "user.name=T", "commit", "-m", "flag")
+    assert workspace.search(repo, "export")
+    assert workspace.search(repo, "export", whole_word=True) == []
+
+
+def test_whole_word_still_finds_the_word_itself(repo):
+    write(repo / "flags.py", "export = True\n")
+    run(repo, "add", "-A")
+    run(repo, "-c", "user.email=t@e.com", "-c", "user.name=T", "commit", "-m", "flag")
+    assert workspace.search(repo, "export", whole_word=True)

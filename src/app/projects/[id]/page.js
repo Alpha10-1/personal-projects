@@ -46,6 +46,7 @@ import ProjectPlan from "@/components/ProjectPlan";
 import CodeWorkspace from "@/components/CodeWorkspace";
 import AgentRuns from "@/components/AgentRuns";
 import CodeChanges from "@/components/CodeChanges";
+import ProjectInventory from "@/components/ProjectInventory";
 import ProjectTeam from "@/components/ProjectTeam";
 import TimeLogPanel from "@/components/TimeLogPanel";
 
@@ -494,6 +495,14 @@ export default function ProjectDetailPage() {
 
       {tab === "repo" ? (
         <div className="space-y-5">
+          <ProjectInventory
+            project={p}
+            onSurveyed={() => {
+              // The outline lands in notes and the gaps in suggestions,
+              // so the rest of the page is now out of date.
+              project.reload({ quiet: true });
+            }}
+          />
           <ProjectHistory project={p} />
           <RepoInsights project={p} />
         </div>

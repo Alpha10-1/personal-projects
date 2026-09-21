@@ -234,6 +234,13 @@ def first_doc(text: str, suffix: str) -> Optional[str]:
 # nothing either way.
 MIN_TERM = 4
 
+# Free text needs a higher bar than an exact one. Matching `list_widgets`
+# against the list of definitions is unambiguous at four characters;
+# grepping for `auth` is not, and on a real run that discarded a genuine
+# "there is no authentication" gap because the word appears in a comment,
+# in a glob pattern, and inside the SDK's own error strings.
+MIN_SEARCH_TERM = 6
+
 
 def index(root: Path) -> dict:
     """Everything the repository defines, by name, plus its paths.
@@ -289,8 +296,19 @@ def already_there(root: Path, term: str, built: dict) -> Optional[str]:
         if needle in route:
             return f"the route `{route}` already exists"
 
-    hits = workspace.search(root, term, limit=6)
-    real = [h for h in hits if not impact.is_test(h["path"])]
+    if len(needle) < MIN_SEARCH_TERM:
+        return None
+    hits = workspace.search(root, term, limit=12, whole_word=True)
+    # A mention in a test is a test for something that may not exist; a
+    # mention in the README is a plan, a caveat, or a description of what
+    # is missing. Neither is an implementation, and treating them as one
+    # is how a real gap gets filtered out.
+    real = [
+        h
+        for h in hits
+        if not impact.is_test(h["path"])
+        and Path(h["path"]).suffix.lower() not in DOC_SUFFIXES
+    ]
     if real:
         where = ", ".join(sorted({h["path"] for h in real})[:3])
         return f"`{term}` already appears in {where}"

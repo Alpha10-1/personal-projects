@@ -480,6 +480,77 @@ thinking.
 
 ---
 
+## The survey: what the project does, and what it does not
+
+On the **Repo** tab, two things sit above the commit history.
+
+### The inventory
+
+Read from the files themselves, free and instant: every module with the
+definitions in it, every HTTP route, every database table, every page and
+component, every configuration variable the code reads. It comes from `git
+ls-files`, so build output and anything gitignored are excluded exactly as
+the repository's own author decided they should be.
+
+### The survey
+
+Press it and that inventory goes to the model, which does two things.
+
+**It writes down what the project already does**, feature by feature, with
+the files each lives in and whether it is complete, partial or scaffolded.
+That outline is written into the project's notes as *What this project
+does*, updating in place rather than accumulating.
+
+**It proposes what is missing**, and each proposal becomes a suggestion
+against the project. Accepting one adds it to the board as a task, with the
+reasoning as its notes. No code is written.
+
+### Not suggesting what is already built
+
+This is the whole point, and the reason the feature is shaped the way it
+is. A suggestion to build what you built last week is worse than no
+suggestion: it teaches you that the suggestions are not worth reading, and
+after that the good ones go unread too.
+
+So the model does not get the last word. For each gap it must name what it
+would expect to find in this repository **if that work had already been
+done** -- function names, file names, route paths, config keys. Those terms
+are then searched for, and a gap whose evidence turns up is discarded before
+anyone sees it. It is not asked to be right; it is asked to be checkable.
+
+A second, weaker check catches what the first misses. If a proposal's title
+shares a distinctive word with something the repository already defines,
+the suggestion carries a warning naming it. That one exists because of a
+real miss: the model proposed *"configure protected file patterns per
+project"* against a codebase that already had `Project.protected_paths` and
+`agent.protected_patterns`, and it survived the first check only because it
+had guessed `pp-agent-ignore` as the thing to search for. The warning never
+discards, because it over-matches by design.
+
+**Everything discarded is shown**, with the term that matched. A filter
+nobody can see is a filter nobody can correct, and this one is worth
+watching: on real runs it has been wrong in both directions.
+
+Getting it wrong in the other direction matters just as much, and three
+rules came out of running it against this repository:
+
+- **A short word is not grepped for.** "Add authentication" was discarded
+  because `auth` appears in a comment, in a glob pattern and inside the
+  SDK's own error strings. Exact matches against the inventory are trusted
+  at four characters; a free-text search needs six.
+- **A mention in documentation is not an implementation.** A README
+  describing what is missing must not be taken as proof it is present.
+- **Substrings are not matches.** `export` inside `exported` concluded that
+  a CSV export already existed. The search asks git for whole words.
+
+### What it costs
+
+One survey of this repository -- 146 source files, 40,000 lines -- is a
+single call: roughly 17,000 input tokens and **$0.07**. The inventory
+underneath it is free and reloads on its own.
+
+---
+
 ## The Code tab: the working copy, and an agent that edits it
 
 Set a project's **local folder** in its brief and a Code tab appears. It
@@ -987,6 +1058,8 @@ backend/
     agent.py       the coding agent -- tools, overlay, protected paths
     impact.py      what a change reaches, and what a selection is
     explainer.py   the model's reading of a selection, grounded and cached
+    inventory.py   what the repository contains, and proving a gap is a gap
+    survey.py      the feature outline into notes, the gaps into suggestions
     routes/code.py editing, approval, the outline and the undo
     ai.py          the model client -- the only thing that leaves the machine
     assistant.py   what the model is told, and what it is asked for

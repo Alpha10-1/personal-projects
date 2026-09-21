@@ -362,7 +362,9 @@ def listing(root: Path, relative: str = "") -> list[dict]:
     return sorted(entries, key=lambda e: (e["type"] != "dir", e["name"].lower()))
 
 
-def search(root: Path, pattern: str, limit: int = 60) -> list[dict]:
+def search(
+    root: Path, pattern: str, limit: int = 60, whole_word: bool = False
+) -> list[dict]:
     """Fixed-string search across tracked files.
 
     `git grep` rather than a walk: it respects .gitignore for free, which is
@@ -370,14 +372,22 @@ def search(root: Path, pattern: str, limit: int = 60) -> list[dict]:
     `node_modules`. Fixed-string, because the caller is looking for an
     identifier far more often than for a regex, and a stray `(` should not
     be an error.
+
+    `whole_word` is off by default because the Code tab's search box should
+    behave like a search box. Callers reasoning about whether something
+    exists want it on: `export` appearing inside `exported` is not evidence
+    of anything.
     """
     if not (pattern or "").strip():
         return []
     try:
-        raw = git(
-            root, "grep", "--fixed-strings", "--line-number", "--no-color",
-            "-I", "-e", pattern,
-        )
+        args = ["grep", "--fixed-strings", "--line-number", "--no-color", "-I"]
+        if whole_word:
+            # `--word-regexp`, because a substring match is often the wrong
+            # answer: searching for `export` found `exported` and concluded
+            # a CSV export already existed.
+            args.append("--word-regexp")
+        raw = git(root, *args, "-e", pattern)
     except WorkspaceError:
         # git grep exits non-zero when there are simply no matches, which is
         # an answer rather than a failure.
