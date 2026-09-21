@@ -1,7 +1,7 @@
 from datetime import date, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -63,6 +63,7 @@ def list_tasks(
     unassigned_project: bool = False,
     top_level_only: bool = False,
     q: Optional[str] = None,
+    limit: int = Query(100, ge=1, le=500),
 ):
     stmt = select(models.Task)
     if project_id is not None:
@@ -94,7 +95,7 @@ def list_tasks(
         like = f"%{q.strip()}%"
         stmt = stmt.where(models.Task.title.ilike(like))
 
-    tasks = sorted(db.execute(stmt).scalars(), key=_sort_key)
+    tasks = sorted(db.execute(stmt).scalars(), key=_sort_key)[:limit]
     return serialize(schemas.TaskOut, enrich_tasks(db, tasks))
 
 

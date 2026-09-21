@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { GitBranch } from "lucide-react";
+import { FolderGit2, GitBranch, ShieldAlert } from "lucide-react";
 
 import { api } from "@/lib/api";
 import { PRIORITIES, PROJECT_CATEGORIES, PROJECT_STATUSES } from "@/lib/constants";
@@ -21,6 +21,8 @@ const EMPTY = {
   stakeholder: "",
   tech_stack: "",
   repo: "",
+  local_path: "",
+  protected_paths: "",
   progress_override: "",
   retro: "",
 };
@@ -78,6 +80,8 @@ export default function ProjectForm({ open, onClose, onSaved, project = null }) 
         stakeholder: text(form.stakeholder),
         tech_stack: text(form.tech_stack),
         repo: text(form.repo),
+        local_path: text(form.local_path),
+        protected_paths: text(form.protected_paths),
         progress_override:
           form.progress_override === "" ? null : Number(form.progress_override),
         retro: text(form.retro),
@@ -203,6 +207,40 @@ export default function ProjectForm({ open, onClose, onSaved, project = null }) 
             placeholder="owner/name"
             pattern="^$|^[\w.-]+/[\w.-]+$"
             title="Use owner/name, for example Alpha10-1/personal-projects"
+          />
+        </Field>
+
+        <Field
+          label={
+            <span className="inline-flex items-center gap-1.5">
+              <FolderGit2 size={13} /> Local folder
+              <Badge tone="neutral">optional</Badge>
+            </span>
+          }
+          hint="The checkout on this machine. Setting it turns on the Code tab — the live working copy, and the agent that can propose edits to it. Separate from the GitHub link: a repo you have not cloned has one and not the other."
+        >
+          <input
+            type="text"
+            value={form.local_path}
+            onChange={set("local_path")}
+            placeholder="C:\\Users\\you\\repos\\project"
+          />
+        </Field>
+
+        <Field
+          label={
+            <span className="inline-flex items-center gap-1.5">
+              <ShieldAlert size={13} /> Files that need your approval
+              <Badge tone="neutral">optional</Badge>
+            </span>
+          }
+          hint="One glob per line. The agent may still change these, but a run that does can never be applied automatically. Leave blank for the built-in list: migrations, CI, lockfiles, auth and models."
+        >
+          <textarea
+            rows={3}
+            value={form.protected_paths}
+            onChange={set("protected_paths")}
+            placeholder={"**/migrations/*\nsrc/pricing.py"}
           />
         </Field>
 

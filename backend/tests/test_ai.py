@@ -10,7 +10,7 @@ import json
 
 import pytest
 
-from app import ai, assistant, github
+from app import ai, assistant, github, privacy
 
 
 @pytest.fixture
@@ -463,3 +463,115 @@ async def test_chat_asks_for_low_effort_so_thinking_stays_cheap(monkeypatch):
 
     assert seen["output_config"] == {"effort": "low"}
     assert seen["max_tokens"] == ai.MAX_CHAT_TOKENS
+
+
+# --- converse: the multi-turn call the agent runs on ----------------------
+#
+# These exist because the first real agent run crashed inside converse and
+# every agent test had faked converse away. The privacy check has to survive
+# whatever the SDK hands back, which is not dicts.
+
+
+class _NotSerialisable:
+    """Stands in for a ThinkingBlock: no __dict__ json can use, but a repr
+    that carries the text."""
+
+    __slots__ = ("text",)
+
+    def __init__(self, text):
+        self.text = text
+
+    def __repr__(self):
+        return f"<thinking {self.text!r}>"
+
+
+def _client_returning(message, monkeypatch, captured=None):
+    from types import SimpleNamespace
+
+    async def create(**kwargs):
+        if captured is not None:
+            captured.update(kwargs)
+        return message
+
+    monkeypatch.setattr(
+        ai,
+        "_client",
+        lambda timeout=None: SimpleNamespace(messages=SimpleNamespace(create=create)),
+    )
+
+
+@pytest.mark.anyio
+async def test_converse_survives_sdk_blocks_in_the_history(monkeypatch):
+    """The regression. An assistant turn is handed back as the objects the
+    SDK produced, and json.dumps refuses those -- which took down the first
+    real run before the privacy check had looked at anything."""
+    from types import SimpleNamespace
+
+    reply = SimpleNamespace(content=[], usage=None)
+    _client_returning(reply, monkeypatch)
+
+    history = [
+        {"role": "user", "content": "hello"},
+        {"role": "assistant", "content": [_NotSerialisable("some reasoning")]},
+    ]
+    assert await ai.converse(system="s", messages=history, tools=[]) is reply
+
+
+@pytest.mark.anyio
+async def test_converse_still_checks_content_inside_those_blocks(monkeypatch):
+    """The point of not crashing is that the check still runs. A blocked term
+    hidden in an unserialisable block must still stop the call."""
+    from types import SimpleNamespace
+
+    _client_returning(SimpleNamespace(content=[], usage=None), monkeypatch)
+    monkeypatch.setattr(privacy, "sensitive_terms", lambda db=None: ["deadbeefcafe"])
+
+    history = [{"role": "assistant", "content": [_NotSerialisable("id deadbeefcafe")]}]
+    with pytest.raises(privacy.SensitiveDataBlocked):
+        await ai.converse(system="s", messages=history, tools=[])
+
+
+@pytest.mark.anyio
+async def test_converse_passes_the_tools_through(monkeypatch):
+    from types import SimpleNamespace
+
+    captured = {}
+    _client_returning(SimpleNamespace(content=[], usage=None), monkeypatch, captured)
+    tools = [
+        {"name": "search", "input_schema": {"type": "object"}},
+        {"name": "read_file", "input_schema": {"type": "object"}},
+    ]
+    await ai.converse(system="s", messages=[{"role": "user", "content": "x"}], tools=tools)
+    assert [t["name"] for t in captured["tools"]] == ["search", "read_file"]
+    assert captured["system"] == [
+        {"type": "text", "text": "s", "cache_control": {"type": "ephemeral"}}
+    ]
+
+
+@pytest.mark.anyio
+async def test_converse_caches_the_system_prompt_and_the_tools(monkeypatch):
+    """An agent run re-sends the whole exchange every turn. Without this the
+    first three real runs cost $0.93 to change one line, almost all of it
+    re-read input."""
+    from types import SimpleNamespace
+
+    captured = {}
+    _client_returning(SimpleNamespace(content=[], usage=None), monkeypatch, captured)
+    tools = [{"name": "a", "input_schema": {}}, {"name": "b", "input_schema": {}}]
+    await ai.converse(system="s", messages=[{"role": "user", "content": "x"}], tools=tools)
+
+    # The marker goes on the last tool, which caches everything before it.
+    assert "cache_control" not in captured["tools"][0]
+    assert captured["tools"][-1]["cache_control"] == {"type": "ephemeral"}
+
+
+@pytest.mark.anyio
+async def test_marking_the_tools_does_not_mutate_the_caller_s_list(monkeypatch):
+    """`agent.TOOLS` is a module-level constant. Writing into it would make
+    the second run in a process differ from the first."""
+    from types import SimpleNamespace
+
+    _client_returning(SimpleNamespace(content=[], usage=None), monkeypatch)
+    tools = [{"name": "a", "input_schema": {}}]
+    await ai.converse(system="s", messages=[{"role": "user", "content": "x"}], tools=tools)
+    assert tools == [{"name": "a", "input_schema": {}}]

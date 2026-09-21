@@ -43,6 +43,8 @@ import RepoInsights from "@/components/RepoInsights";
 import Dashboards from "@/components/Dashboards";
 import ProjectHistory from "@/components/ProjectHistory";
 import ProjectPlan from "@/components/ProjectPlan";
+import CodeWorkspace from "@/components/CodeWorkspace";
+import AgentRuns from "@/components/AgentRuns";
 import ProjectTeam from "@/components/ProjectTeam";
 import TimeLogPanel from "@/components/TimeLogPanel";
 
@@ -53,6 +55,7 @@ const TABS = [
   { key: "library", label: "Notes, files & reports" },
   { key: "team", label: "Team" },
   { key: "repo", label: "Repo" },
+  { key: "code", label: "Code" },
   { key: "plan", label: "Plan" },
   { key: "brief", label: "Brief" },
 ];
@@ -489,6 +492,13 @@ export default function ProjectDetailPage() {
         <div className="space-y-5">
           <ProjectHistory project={p} />
           <RepoInsights project={p} />
+        </div>
+      ) : null}
+
+      {tab === "code" ? (
+        <div className="space-y-5">
+          <CodeWorkspace project={p} />
+          <AgentRuns project={p} />
         </div>
       ) : null}
 

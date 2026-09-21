@@ -51,23 +51,44 @@ MAX_READ_BYTES = 250_000
 # proposing more than this has misunderstood the job.
 MAX_WRITE_BYTES = 200_000
 
-# Never editable, whatever a project says, because editing them is never
-# what was asked for and is sometimes catastrophic. `.git` would corrupt the
-# repository; the rest are credentials and installed code.
-NEVER_WRITE = (
-    ".git/*",
+# Never *read*, and therefore never sent to the model. This is the stronger
+# of the two lists and the one that matters most: a write the agent should
+# not have made is visible in the diff and can be discarded, whereas a
+# credential it read has already left the machine by the time anyone looks.
+#
+# The tracker's own repository has a `.env.local` in its root. Nothing in
+# `privacy.py` would have stopped it going out -- that guard is about Power
+# BI identifiers -- so this list is what stands between an agent that can
+# read files and an API key in a prompt.
+NEVER_READ = (
     "*.env",
     ".env",
     ".env.*",
     "**/.env",
     "**/.env.*",
+    "**/*.pem",
+    "**/*.key",
+    "**/*.pfx",
+    "**/*.p12",
+    "**/id_rsa*",
+    "**/id_ed25519*",
+    "**/credentials.json",
+    "**/serviceAccountKey.json",
+    "**/*secret*.json",
+    "**/.npmrc",
+    "**/.pypirc",
+    "**/.netrc",
+)
+
+# Never editable, whatever a project says, because editing them is never
+# what was asked for and is sometimes catastrophic. `.git` would corrupt the
+# repository; the rest are installed code and everything above.
+NEVER_WRITE = NEVER_READ + (
+    ".git/*",
+    "**/.git/*",
     "node_modules/*",
     "**/node_modules/*",
     ".venv/*",
-    "**/*.pem",
-    "**/*.key",
-    "**/id_rsa*",
-    "**/serviceAccountKey.json",
 )
 
 # The default answer to "which parts of this project are core". Migrations
@@ -130,6 +151,11 @@ class Overlay:
     read_bytes: int = 0
 
     def read(self, relative: str) -> str:
+        if matches(relative, NEVER_READ):
+            raise AgentError(
+                f"{relative} holds credentials and is never readable by the "
+                "agent. Nothing in it has been sent anywhere."
+            )
         if relative in self.pending:
             content = self.pending[relative]
             if content is None:
@@ -317,6 +343,56 @@ TOOLS = [
 ]
 
 
+# How many rolling cache breakpoints to keep in the conversation. Two, so a
+# turn can hit the cache written by the turn before it as well as the one
+# before that -- a single moving marker means every other turn starts from
+# a prefix nothing has cached yet.
+CACHE_POINTS = 2
+
+
+def mark_cache(messages: list[dict]) -> None:
+    """Move the cache breakpoints to the end of the conversation.
+
+    Without this an agent run re-sends the whole exchange at full price on
+    every turn, and the exchange grows by a file each time. The first three
+    real runs here cost $0.93 for one edited line, almost all of it re-read
+    input.
+
+    Only the tool-result turns this module builds are marked. The assistant
+    turns are the SDK's own objects and are left exactly as they came back,
+    because the API compares them against what it sent.
+    """
+    ours = [
+        m["content"]
+        for m in messages
+        if isinstance(m.get("content"), list)
+        and m["content"]
+        and isinstance(m["content"][-1], dict)
+    ]
+    for content in ours:
+        content[-1].pop("cache_control", None)
+    for content in ours[-CACHE_POINTS:]:
+        content[-1]["cache_control"] = {"type": "ephemeral"}
+
+
+def match_endings(content: str, fragment: str) -> str:
+    """Give a fragment the line endings of the file it is going into.
+
+    Found by the agent itself, on its first real run: every multi-line
+    `edit_file` came back "that exact string is not in the file", while
+    single-line ones worked. The cause is that `read_file` numbers lines and
+    rejoins them with `\\n`, so what the model copies back can never match a
+    CRLF file -- and the one edit that did land wrote an LF line into a CRLF
+    file, which would have shown up as a spurious whole-line change.
+
+    Normalising to LF first means a fragment that already has the right
+    endings is left alone rather than gaining `\\r\\r\\n`.
+    """
+    if "\r\n" not in content:
+        return fragment
+    return fragment.replace("\r\n", "\n").replace("\n", "\r\n")
+
+
 def run_tool(overlay: Overlay, name: str, args: dict) -> str:
     """Carry out one tool call and return what the model should see.
 
@@ -335,6 +411,11 @@ def run_tool(overlay: Overlay, name: str, args: dict) -> str:
 
         if name == "search":
             hits = workspace.search(overlay.root, args.get("pattern", ""))
+            # A search result carries the matching line, so an unfiltered
+            # grep is a read of every tracked file at once. One of these
+            # repositories has a committed serviceAccountKey.json; without
+            # this, searching for "key" would have returned its contents.
+            hits = [h for h in hits if not matches(h["path"], NEVER_READ)]
             if not hits:
                 return "No matches."
             return "\n".join(f"{h['path']}:{h['line']}: {h['text']}" for h in hits)
@@ -351,6 +432,7 @@ def run_tool(overlay: Overlay, name: str, args: dict) -> str:
         if name == "edit_file":
             path, old, new = args["path"], args["old"], args["new"]
             content = overlay.read(path)
+            old, new = match_endings(content, old), match_endings(content, new)
             count = content.count(old)
             if count == 0:
                 return (
@@ -451,7 +533,14 @@ async def execute(project, instruction: str, *, max_turns: int = MAX_TURNS) -> d
         raise AgentError(str(exc)) from exc
 
     messages: list[dict] = [
-        {"role": "user", "content": brief(project, instruction, tree, protected)}
+        {
+            "role": "user",
+            # A list of one block rather than a bare string, so the opening
+            # brief can carry a cache breakpoint like every later turn.
+            "content": [
+                {"type": "text", "text": brief(project, instruction, tree, protected)}
+            ],
+        }
     ]
     summary: Optional[str] = None
     error: Optional[str] = None
@@ -459,6 +548,7 @@ async def execute(project, instruction: str, *, max_turns: int = MAX_TURNS) -> d
 
     while turns < max_turns:
         turns += 1
+        mark_cache(messages)
         try:
             message = await ai.converse(
                 system=SYSTEM,

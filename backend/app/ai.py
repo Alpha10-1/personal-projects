@@ -267,6 +267,44 @@ async def structured(
     raise AIFailed("The model returned nothing usable.")
 
 
+CACHE = {"cache_control": {"type": "ephemeral"}}
+
+
+def _cache_tools(tools: list[dict]) -> list[dict]:
+    """Mark the last tool, which caches the system prompt and all of them.
+
+    Copied rather than mutated: the caller passes a module-level constant,
+    and quietly writing into it would make the second run in a process
+    different from the first.
+    """
+    if not tools:
+        return tools
+    return [*tools[:-1], {**tools[-1], **CACHE}]
+
+
+def _as_text(payload: Any) -> str:
+    """Flatten anything bound for the API into text the privacy check can read.
+
+    A conversation's assistant turns are handed straight back to the SDK as
+    the objects it produced -- `ThinkingBlock`, `TextBlock`, `ToolUseBlock` --
+    and `json.dumps` refuses those outright. That refusal took down the first
+    real agent run: the privacy check raised `TypeError` before it had
+    checked anything.
+
+    `default=str` is deliberate and is the safe direction. Falling back to
+    `repr` includes the block's text, so the check still sees the words; the
+    alternative failure, a block silently serialised as `null`, would mean
+    the check passing on content it never looked at.
+    """
+    try:
+        return json.dumps(payload, default=str)
+    except Exception:
+        # Even repr can raise. A string that cannot be built is not a reason
+        # to send unchecked content, so fall back to something the check can
+        # still scan rather than to nothing.
+        return str(payload)
+
+
 async def converse(
     *,
     system: str,
@@ -292,16 +330,21 @@ async def converse(
     for go out on the next turn. Serialising the whole message list and
     checking that is the only version that covers them.
     """
-    privacy.check_outgoing(system, json.dumps(messages), json.dumps(tools))
+    privacy.check_outgoing(system, _as_text(messages), _as_text(tools))
     client = _client(timeout)
     started = time.monotonic()
     try:
         message = await client.messages.create(
             model=model,
             max_tokens=max_tokens,
-            system=system,
+            # The system prompt and the tool definitions are identical on
+            # every turn of a run and sit at the front of the request, so
+            # they are the cheapest possible thing to cache. Marking the
+            # last tool covers both, since the cached prefix runs from the
+            # start of the request to the marker.
+            system=[{"type": "text", "text": system, **CACHE}],
             messages=messages,
-            tools=tools,
+            tools=_cache_tools(tools),
         )
     except Exception as exc:
         reason = _unwrap(exc)

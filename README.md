@@ -480,6 +480,90 @@ thinking.
 
 ---
 
+## The Code tab: the working copy, and an agent that edits it
+
+Set a project's **local folder** in its brief and a Code tab appears. It
+shows the checkout as it is right now -- branch, last commit, uncommitted
+changes, the file tree, any file's contents, and a coloured diff -- read
+from disk on every request and refreshed every four seconds, so an edit you
+make in VS Code shows up here without a reload. None of it touches the
+network.
+
+The folder is separate from the GitHub link because they answer different
+questions. `repo` says whose history to ingest; `local_path` says which
+folder to read now. A repository you have not cloned has one and not the
+other.
+
+### Opening things in VS Code
+
+Every file offers **Open in VS Code**. It runs the `code` CLI on the server,
+which works because the server and the editor are the same machine -- the
+first thing to revisit if this were ever hosted. If the CLI is missing, the
+panel offers the `vscode://` deep link instead, which needs nothing
+installed. `PP_EDITOR_COMMAND` overrides the command for a different editor.
+
+### Asking for a change
+
+Below the file view, describe a change. The agent reads the repository
+through the same six tools -- list, search, read, edit, write, finish -- and
+produces a **proposal**: the whole new contents of each file it wants to
+change, a diff, and its own account of what it did and what it could not
+verify.
+
+Nothing is written while it thinks. Every edit goes into an in-memory
+overlay, so a run that goes wrong, runs out of turns or produces nonsense
+costs money and nothing else. **Apply** writes the files and stops there --
+uncommitted, so `git diff` is the review and `git checkout` is the undo.
+
+**Apply automatically** exists for small changes, and is overridden whenever
+the run touches a path the project marks as core. Those globs are per
+project, because "core" differs: a migrations folder here, a pricing module
+there. Left blank, the built-in list covers migrations, CI workflows,
+lockfiles, auth, `privacy.py` and `models.py`. `auto_apply` is a preference;
+`review_required` is not.
+
+### What it cannot do
+
+- **No shell.** It cannot run your tests, install anything, or execute a
+  command. It says so in its own summaries: a change it proposes is
+  untested, and it is told to say that rather than imply otherwise.
+- **No credentials.** A separate, stricter list -- `.env` and its variants,
+  keys, certificates, `serviceAccountKey.json`, `.npmrc`, `.netrc` -- can
+  neither be read nor searched. This matters more than the write list: a bad
+  write shows up in the diff and can be discarded, whereas anything read has
+  already left the machine by the time anyone looks. This repository has a
+  `.env.local` in its root, and nothing in `privacy.py` would have stopped
+  it going out, because that guard is about Power BI identifiers.
+- **Nothing outside the folder.** Every path is re-resolved and proved to be
+  inside the repository after joining, so `..` and a symlink fail
+  identically. The folder itself must sit under an allowed root --
+  your home directory, unless `PP_WORKSPACE_ROOTS` says otherwise.
+- **One run per project at a time.** Two agents on the same tree would build
+  two proposals from the same base, and applying both would silently lose
+  one.
+
+### What it costs
+
+Every turn re-sends the whole exchange, so the input grows through a run.
+Prompt caching is on: the system prompt and tools are cached, plus a rolling
+pair of breakpoints over the conversation. Measured on this repository, a
+7-turn uncached run cost $0.13 and an 8-turn cached one cost $0.10 -- the
+saving is smaller than the token counts suggest, because cache writes cost
+1.25x and a growing conversation writes on every turn. Longer runs save
+more. Either way it is in the spend ledger with everything else.
+
+A worked example, both of which are in this repository's history: asked to
+add a `limit` parameter to `/tasks`, the agent read the file, found the
+pattern used by `people.py` and `review.py`, noticed that this route sorts
+in Python rather than in SQL, and applied the cap after the sort instead of
+calling `.limit()` on the statement. It said the change was untested. It
+also reported that `edit_file` was rejecting multi-line matches -- which was
+true, and was a real bug in the tool: this repository is CRLF on disk, and
+the numbered file listing rejoins lines with `\n`, so nothing multi-line
+could ever match. Fixed; the same run then took 7 turns instead of 17.
+
+---
+
 ## Power BI
 
 Two halves, and the first needs nothing set up.
@@ -787,6 +871,9 @@ backend/
     history.py     what a repo's commit history says, as arithmetic
     share.py       the read-only snapshot you send someone
     powerbi.py     the Power BI Service: reports and refresh state
+    workspace.py   the checkout on disk: branch, status, diff, files
+    editor.py      handing a file to VS Code, by link or by CLI
+    agent.py       the coding agent -- tools, overlay, protected paths
     ai.py          the model client -- the only thing that leaves the machine
     assistant.py   what the model is told, and what it is asked for
     routes/        projects, milestones, tasks, time_logs, library, dashboard, ai

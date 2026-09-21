@@ -33,6 +33,7 @@ def list_projects(
     q: Optional[str] = None,
     include_archived: bool = False,
     workspace: Optional[str] = None,
+    limit: int = Query(200, ge=1, le=1000),
 ):
     stmt = select(models.Project)
     # Omitted means "everything", so existing callers and the MCP tools are
@@ -67,7 +68,7 @@ def list_projects(
             -p.id,
         )
     )
-    return serialize(schemas.ProjectOut, enrich_projects(db, projects))
+    return serialize(schemas.ProjectOut, enrich_projects(db, projects[:limit]))
 
 
 @router.post("", response_model=schemas.ProjectOut, status_code=201)

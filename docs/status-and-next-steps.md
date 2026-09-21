@@ -10,9 +10,9 @@ on its own.*
 
 | | |
 |---|---|
-| Backend tests | 620 passing, 3 deselected (network-marked) |
-| Frontend tests | 84 passing across 8 files |
-| Tables | 16 |
+| Backend tests | 734 passing, 3 deselected (network-marked) |
+| Frontend tests | 102 passing across 10 files |
+| Tables | 17 |
 | Projects | 5, all linked to a repo, all with a summary |
 | Commits ingested | 199, of which 197 have file-level detail |
 | Tasks / milestones / time logs | **0 / 0 / 0** |
@@ -20,7 +20,7 @@ on its own.*
 | Suggestions | 5 raised, all 5 accepted |
 | People / dashboards / brainstorms | 0 / 0 / 0 |
 | MCP tools | 34 |
-| Model spend to date | $0.0872 across 7 calls |
+| Model spend to date | $1.12 across 40 calls — see the note on agent runs below |
 | Nightly analyst run | green, last ran 07:30 on 21 Sep, exit 0 |
 
 The tracker itself — board, review rules, findings, commit timeline, spend
@@ -29,13 +29,19 @@ the only part that sends anything anywhere.
 
 ### What is deliberately not done
 
-Two rules are in force and should stay in force unless a decision is made to
-change them:
+Three rules are in force and should stay in force unless a decision is made
+to change them:
 
 - **Nothing identifying a Power BI report, workspace or dataset is ever
   sent to a model.** There is no setting that turns this off.
 - **The assistant proposes; it never rewrites.** It may add a note and it
   may raise a suggestion. It cannot overwrite something you wrote.
+- **The coding agent has no shell and cannot read credentials.** It edits
+  into an overlay and nothing reaches disk until you apply it. The
+  credential list (`.env*`, keys, certificates, `serviceAccountKey.json`,
+  `.npmrc`, `.netrc`) is enforced on reads and on search, not only on
+  writes, because a read has already left the machine by the time anyone
+  reviews a diff.
 
 ---
 
@@ -79,7 +85,15 @@ Ordered by what I would actually do next.
 |---|---|---|
 | **Alembic** | ~half a day | 16 tables and `ensure_columns()` can only *add* columns. Every change so far has been an addition, which is partly luck. The first rename or type change will be hand-written SQL against live data. |
 | **Delete the duplicate SSE parser** | ~20 min | `ProjectHistory.js` has its own copy of the streaming parser; the tested one is in `lib/ai.js`. The version under test and the version shipping are different code. |
-| **`limit` on `/tasks` and `/projects`** | ~1h | Neither has one. Fine at this size, not at 1,000 rows. |
+
+### New since the Code tab landed
+
+| | Effort | Why |
+|---|---|---|
+| **Point the remaining three projects at folders** | minutes each | Only `personal-projects` and `Organization_management_system` are checked out. `admin-dashboard`, `ride-native` and `course-finder-app` exist only on GitHub, so they have no Code tab. Clone them and set the folder in each brief. |
+| **Watch what agent runs cost** | ongoing | Spend went from $0.09 to $1.12 in one afternoon, almost all of it agent runs. A run is roughly $0.10--$0.15 with caching on. That is fine occasionally and not fine as a habit; the Spend page breaks it down by feature. |
+| **Consider a test-running tool** | ~half a day, and a real decision | The agent's honest weakness is that it cannot verify anything. A single fixed, project-configured command (not arbitrary shell) would let it check its own work. It is a meaningfully larger security surface than reading and writing files, which is why it was left out. |
+| **Frontend tests for the Code tab's own panels** | ~2h | `DiffView` and `AgentRuns` are tested; `CodeWorkspace` is not. |
 
 ### Larger, and genuinely optional
 

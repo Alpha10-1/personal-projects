@@ -333,3 +333,180 @@ def test_apply_refuses_the_whole_batch_if_one_path_is_bad(repo):
 def test_apply_refuses_a_never_write_path(repo):
     with pytest.raises(agent.AgentError, match="Refusing to write"):
         agent.apply(repo, json.dumps([{"path": ".env", "action": "create", "content": "K=1"}]))
+
+
+# --- credentials never reach the model -----------------------------------
+#
+# The write list stops the agent damaging a secret. This list stops it
+# reading one, which is the failure that cannot be undone: by the time a
+# diff is reviewed, anything read has already been sent.
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        ".env",
+        ".env.local",
+        "backend/.env",
+        "functions/.env",
+        "serviceAccountKey.json",
+        "config/serviceAccountKey.json",
+        "certs/server.key",
+        "certs/server.pem",
+        ".npmrc",
+        "home/.netrc",
+        "id_rsa",
+    ],
+)
+def test_the_agent_cannot_read_a_credential_file(overlay, repo, path):
+    target = repo / path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    write(target, "SECRET=hunter2\n")
+    with pytest.raises(agent.AgentError, match="never readable"):
+        overlay.read(path)
+
+
+def test_the_refusal_says_nothing_was_sent(overlay, repo):
+    write(repo / ".env", "ANTHROPIC_API_KEY=sk-ant-real\n")
+    out = agent.run_tool(overlay, "read_file", {"path": ".env"})
+    assert "sk-ant-real" not in out
+    assert "Nothing in it has been sent anywhere" in out
+
+
+def test_search_does_not_return_lines_from_credential_files(overlay, repo):
+    write(repo / "serviceAccountKey.json", '{"private_key": "-----BEGIN PRIVATE KEY-----"}\n')
+    write(repo / "src" / "uses.py", "KEY = load('serviceAccountKey.json')\n")
+    run_git(repo, "add", "-A")
+    run_git(repo, "-c", "user.email=t@e.com", "-c", "user.name=T", "commit", "-m", "add")
+    out = agent.run_tool(overlay, "search", {"pattern": "PRIVATE KEY"})
+    assert "BEGIN PRIVATE KEY" not in out
+    assert out == "No matches."
+
+
+def test_search_still_returns_ordinary_matches(overlay, repo):
+    out = agent.run_tool(overlay, "search", {"pattern": "greet"})
+    assert "src/main.py" in out
+
+
+def test_everything_unreadable_is_also_unwritable():
+    """The read list is the stricter one, so it must be a subset of the other."""
+    assert set(agent.NEVER_READ) <= set(agent.NEVER_WRITE)
+
+
+# --- CRLF ----------------------------------------------------------------
+#
+# The agent found this one itself on its first real run: every multi-line
+# edit_file failed as "not in the file" while single-line ones worked, and
+# the one edit that landed wrote an LF line into a CRLF file.
+
+
+@pytest.fixture
+def crlf_repo(repo):
+    write(repo / "win.py", "def greet():\r\n    return 'hello'\r\n")
+    run_git(repo, "add", "-A")
+    run_git(repo, "-c", "user.email=t@e.com", "-c", "user.name=T", "commit", "-m", "crlf")
+    return repo
+
+
+def test_a_multi_line_edit_matches_in_a_crlf_file(crlf_repo):
+    overlay = agent.Overlay(root=crlf_repo)
+    out = agent.run_tool(
+        overlay,
+        "edit_file",
+        {
+            "path": "win.py",
+            # As the model would send it, having read the numbered listing.
+            "old": "def greet():\n    return 'hello'",
+            "new": "def greet():\n    return 'hi'",
+        },
+    )
+    assert out == "Edited win.py."
+
+
+def test_the_edit_keeps_the_file_on_crlf_throughout(crlf_repo):
+    overlay = agent.Overlay(root=crlf_repo)
+    agent.run_tool(
+        overlay,
+        "edit_file",
+        {"path": "win.py", "old": "    return 'hello'", "new": "    return 'hi'\n    # added"},
+    )
+    result = overlay.read("win.py")
+    assert "\r\n" in result
+    # No bare LF anywhere: a single mixed line is what produced the spurious
+    # whole-line diff that gave this away.
+    assert result.replace("\r\n", "") .count("\n") == 0
+
+
+def test_an_lf_file_is_left_alone(overlay):
+    out = agent.run_tool(
+        overlay,
+        "edit_file",
+        {"path": "src/main.py", "old": "def greet():\n    return 'hello'", "new": "def greet():\n    return 'hi'"},
+    )
+    assert out == "Edited src/main.py."
+    assert "\r" not in overlay.read("src/main.py")
+
+
+def test_match_endings_does_not_double_up_on_a_fragment_already_crlf():
+    assert agent.match_endings("a\r\nb", "x\r\ny") == "x\r\ny"
+
+
+def test_match_endings_leaves_an_lf_file_untouched():
+    assert agent.match_endings("a\nb", "x\ny") == "x\ny"
+
+
+# --- prompt caching -------------------------------------------------------
+
+
+def _user_turns(messages):
+    return [m for m in messages if m["role"] == "user"]
+
+
+def test_the_breakpoints_sit_on_the_newest_turns():
+    messages = [
+        {"role": "user", "content": [{"type": "text", "text": "one"}]},
+        {"role": "assistant", "content": "opaque sdk object"},
+        {"role": "user", "content": [{"type": "tool_result", "content": "two"}]},
+        {"role": "user", "content": [{"type": "tool_result", "content": "three"}]},
+    ]
+    agent.mark_cache(messages)
+    marked = [
+        m["content"][-1]["content"]
+        for m in _user_turns(messages)
+        if "cache_control" in m["content"][-1]
+    ]
+    assert marked == ["two", "three"]
+
+
+def test_the_breakpoints_move_rather_than_accumulate():
+    messages = [
+        {"role": "user", "content": [{"type": "text", "text": f"turn {i}"}]}
+        for i in range(5)
+    ]
+    agent.mark_cache(messages)
+    agent.mark_cache(messages)  # a second turn of the loop
+    total = sum(
+        1 for m in messages if "cache_control" in m["content"][-1]
+    )
+    assert total == agent.CACHE_POINTS
+
+
+def test_marking_leaves_assistant_turns_untouched():
+    """Those are the SDK's own objects, compared by the API against what it
+    sent. Anything added to them is a difference."""
+    sdk_turn = {"role": "assistant", "content": "opaque"}
+    messages = [{"role": "user", "content": [{"type": "text", "text": "x"}]}, sdk_turn]
+    agent.mark_cache(messages)
+    assert sdk_turn == {"role": "assistant", "content": "opaque"}
+
+
+def test_a_run_marks_the_opening_brief_for_caching(make, repo, monkeypatch):
+    sent = {}
+
+    async def capture(**kwargs):
+        sent["messages"] = kwargs["messages"]
+        return reply(tool_call("finish", {"summary": "Nothing needed."}))
+
+    monkeypatch.setattr(ai, "converse", capture)
+    asyncio.run(agent.execute(project_row(make, repo), "Have a look."))
+    assert sent["messages"][0]["content"][-1]["cache_control"] == {"type": "ephemeral"}
