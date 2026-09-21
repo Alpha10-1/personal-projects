@@ -18,6 +18,7 @@ from app.routes import (
     activity,
     agent,
     ai,
+    code,
     dashboard,
     dashboards,
     library,
@@ -84,3 +85,4 @@ app.include_router(personal.router)
 app.include_router(ai.router)
 app.include_router(workspace.router)
 app.include_router(agent.router)
+app.include_router(code.router)

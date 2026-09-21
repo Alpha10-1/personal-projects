@@ -45,6 +45,7 @@ import ProjectHistory from "@/components/ProjectHistory";
 import ProjectPlan from "@/components/ProjectPlan";
 import CodeWorkspace from "@/components/CodeWorkspace";
 import AgentRuns from "@/components/AgentRuns";
+import CodeChanges from "@/components/CodeChanges";
 import ProjectTeam from "@/components/ProjectTeam";
 import TimeLogPanel from "@/components/TimeLogPanel";
 
@@ -150,6 +151,9 @@ export default function ProjectDetailPage() {
   const [taskForm, setTaskForm] = useState(null); // null | {task}
   const [milestoneForm, setMilestoneForm] = useState(null);
   const [actionError, setActionError] = useState(null);
+  // Bumped when an edit is saved, so the Changes panel below reloads
+  // without the two components having to know about each other.
+  const [codeChanges, setCodeChanges] = useState(0);
 
   const project = useAsync(
     useCallback(() => api.get(`/projects/${projectId}`), [projectId]),
@@ -497,7 +501,11 @@ export default function ProjectDetailPage() {
 
       {tab === "code" ? (
         <div className="space-y-5">
-          <CodeWorkspace project={p} />
+          <CodeWorkspace
+            project={p}
+            onChangeRaised={() => setCodeChanges((n) => n + 1)}
+          />
+          <CodeChanges project={p} refreshKey={codeChanges} />
           <AgentRuns project={p} />
         </div>
       ) : null}

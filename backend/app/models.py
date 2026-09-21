@@ -85,6 +85,15 @@ class Project(Base):
     # "core" differs per project -- a migration folder here, a pricing
     # module there -- and only the person who owns the project knows which.
     protected_paths = Column(Text, nullable=True)
+    # Who reviews and approves changes to this project's files.
+    #
+    # Not an access control -- this app has no login and one user, so
+    # nothing here can stop anyone doing anything. It is a named
+    # responsibility and a deliberate pause: an edit does not reach disk
+    # until it is approved in that person's name, and the record says who
+    # it was and when. On a single-user board that is a habit, not a
+    # barrier, and it is worth being honest about which.
+    leader_id = Column(Integer, ForeignKey("people.id"), nullable=True, index=True)
 
     # work | personal. Personal projects are deliberately outside the
     # analyst's reach: no findings, no suggestion rules, no scheduled run.
@@ -610,3 +619,64 @@ class AgentRun(Base):
     created_at = Column(DateTime, default=utcnow, index=True)
     finished_at = Column(DateTime, nullable=True)
     applied_at = Column(DateTime, nullable=True)
+
+
+# What a code change is waiting for, and what became of it.
+#
+# `approved` and `applied` are one state, not two: approving is what writes
+# the file, so a change that is approved but not on disk would be a lie.
+CODE_CHANGE_STATUSES = ("pending", "approved", "rejected", "reverted")
+
+
+class CodeChange(Base):
+    """One proposed change to one file, waiting on the project's leader.
+
+    Every route to changing a file arrives here: an edit typed into the
+    browser, and an agent run's proposal. Having one reviewable unit is the
+    point -- otherwise "what has been changed in this project, by what, and
+    who let it through" is two queries against two different shapes, and
+    the answer to "undo that" depends on which.
+
+    Both sides of the change are stored in full. That costs a few kilobytes
+    and buys three things that a stored patch does not: an exact revert, a
+    diff that still renders after the file has moved on, and the ability to
+    say whether what is on disk now is still what was approved.
+    """
+
+    __tablename__ = "code_changes"
+
+    id = Column(Integer, primary_key=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
+
+    path = Column(String(1024), nullable=False, index=True)
+    # create | modify | delete
+    action = Column(String(10), nullable=False, default="modify")
+
+    # Null `before_text` means the file did not exist; null `after_text`
+    # means it is being deleted. Both null is not a change.
+    before_text = Column(Text, nullable=True)
+    after_text = Column(Text, nullable=True)
+
+    # human | agent. Kept because the two deserve different scrutiny, and
+    # because "how much of this file was written by a model" is a question
+    # someone will eventually ask.
+    origin = Column(String(10), nullable=False, default="human", index=True)
+    agent_run_id = Column(Integer, ForeignKey("agent_runs.id"), nullable=True, index=True)
+
+    # Why the change is being made, in the author's words.
+    note = Column(Text, nullable=True)
+
+    status = Column(String(20), nullable=False, default="pending", index=True)
+    approved_by_id = Column(Integer, ForeignKey("people.id"), nullable=True, index=True)
+    approved_at = Column(DateTime, nullable=True, index=True)
+    # Free text on rejection, so a decision is not just a status change.
+    decision_note = Column(Text, nullable=True)
+
+    reverted_at = Column(DateTime, nullable=True)
+
+    # HEAD when the change was raised. If it has moved by the time anyone
+    # approves, the diff being reviewed may no longer be the diff that
+    # lands, and that is worth saying rather than discovering.
+    base_sha = Column(String(40), nullable=True)
+
+    created_at = Column(DateTime, default=utcnow, index=True)

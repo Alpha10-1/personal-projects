@@ -494,6 +494,80 @@ questions. `repo` says whose history to ingest; `local_path` says which
 folder to read now. A repository you have not cloned has one and not the
 other.
 
+### Editing, and who approves it
+
+The file view is a real editor: CodeMirror, with syntax colouring that
+follows VS Code's Light+ and Dark+ palettes. The colours are CSS custom
+properties like every other token in the app, so the editor changes with
+the theme toggle rather than being rebuilt.
+
+**Saving does not write the file.** The button says "Save for review",
+because that is what it does: it raises a change, and the file on disk is
+untouched until someone approves it.
+
+#### The project leader
+
+A project can name a **leader** in its brief: the person who reviews and
+approves changes to its files. Approving is what writes the file, and the
+row records who did it and when.
+
+This is a named responsibility, not a permission. The app has no login and
+one user, so nothing here stops anyone approving anything. What it gives
+you is a deliberate pause and an answer to "why is this file like this"
+six weeks later. Worth being clear about which of those it is.
+
+Both routes into a file arrive at the same place. A typed edit raises one
+change; an agent run can be submitted for review and raises one per file,
+so a run can be taken in part.
+
+#### What a change actually reached
+
+Every change carries an outline, computed from the repository at the moment
+you ask -- not when it was raised, because a reference that appeared since
+is exactly the kind of thing worth knowing.
+
+It reports which definitions were added, removed, altered or **re-signed**
+(called out separately, because changing what a function takes is the one
+that breaks callers), which other files mention them, which tests cover
+them, whether a shared top-level value changed, and whether the path is one
+the project protects.
+
+Effects are ranked worst first and include the reassuring ones. "Nothing
+else in the repository mentions this" is a real finding, and an outline
+that only ever lists dangers is one you learn to skip.
+
+This is the answer to a change waved through too quickly. Open it after the
+fact, see what it touched, and **put the file back** -- exactly, because
+both sides were stored. A revert is refused if the file has moved on since,
+rather than silently discarding whatever came after.
+
+#### Explain
+
+Select any code and an **Explain** button appears in the bottom corner. It
+reports what the selection is, what defines it, which other files mention
+it, which tests cover it, and which top-level values it reads -- because
+module scope is how these languages share anything, so "what else sees this
+value" is the whole of the question.
+
+#### None of this calls a model
+
+The outline and Explain are regexes over source text and `git grep`. That
+makes them free, instant, repeatable, and checkable: "two files reference
+this" is either true or it is not, and both are named.
+
+It also makes them approximate, and they say so. A name built at runtime, a
+dynamic import, a definition inside a conditional: none are found. A search
+matches a mention in a comment as readily as a call. And a name too common
+to search -- `read`, `path`, `status` -- returns **"I cannot tell you"**
+rather than a list of twenty-five irrelevant files, because the first real
+selection tried in anger reported exactly that and it was useless. A method
+carries a caveat that the search is by name, so another class with a method
+of the same name counts as a hit.
+
+Reporting "nothing references this" when the truth is "I did not look" is
+the one failure that would make the whole thing dangerous, so it is the one
+thing tested hardest.
+
 ### Opening things in VS Code
 
 Every file offers **Open in VS Code**. It runs the `code` CLI on the server,
@@ -874,6 +948,8 @@ backend/
     workspace.py   the checkout on disk: branch, status, diff, files
     editor.py      handing a file to VS Code, by link or by CLI
     agent.py       the coding agent -- tools, overlay, protected paths
+    impact.py      what a change reaches, and what a selection is
+    routes/code.py editing, approval, the outline and the undo
     ai.py          the model client -- the only thing that leaves the machine
     assistant.py   what the model is told, and what it is asked for
     routes/        projects, milestones, tasks, time_logs, library, dashboard, ai

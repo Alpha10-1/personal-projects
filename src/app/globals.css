@@ -22,6 +22,22 @@
   --warning: #fab219;
   --serious: #ec835a;
   --critical: #d03b3b;
+
+  /* Syntax colours, following VS Code's Light+ so code in this app looks
+     like code in the editor next to it. Kept as tokens rather than baked
+     into the CodeMirror theme, so the editor inherits dark mode the same
+     way everything else does. */
+  --syn-keyword: #0000ff;
+  --syn-string: #a31515;
+  --syn-comment: #008000;
+  --syn-number: #098658;
+  --syn-function: #795e26;
+  --syn-type: #267f99;
+  --syn-variable: #001080;
+  --syn-constant: #0070c1;
+  --syn-operator: #000000;
+  --syn-invalid: #d03b3b;
+  --syn-selection: #add6ff;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -40,6 +56,20 @@
 
     --accent: #3987e5;
     --accent-soft: #17273c;
+
+    /* Dark+ equivalents. */
+    --syn-keyword: #569cd6;
+    --syn-string: #ce9178;
+    --syn-comment: #6a9955;
+    --syn-number: #b5cea8;
+    --syn-function: #dcdcaa;
+    --syn-type: #4ec9b0;
+    --syn-variable: #9cdcfe;
+    --syn-constant: #4fc1ff;
+    --syn-operator: #d4d4d4;
+    --syn-invalid: #f48771;
+    --syn-selection: #264f78;
+
 
     --good: #0ca30c;
     --warning: #fab219;
@@ -63,6 +93,19 @@
 
   --accent: #3987e5;
   --accent-soft: #17273c;
+
+  /* Dark+ equivalents. */
+  --syn-keyword: #569cd6;
+  --syn-string: #ce9178;
+  --syn-comment: #6a9955;
+  --syn-number: #b5cea8;
+  --syn-function: #dcdcaa;
+  --syn-type: #4ec9b0;
+  --syn-variable: #9cdcfe;
+  --syn-constant: #4fc1ff;
+  --syn-operator: #d4d4d4;
+  --syn-invalid: #f48771;
+  --syn-selection: #264f78;
 }
 
 @theme inline {

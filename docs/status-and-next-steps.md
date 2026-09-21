@@ -10,9 +10,9 @@ on its own.*
 
 | | |
 |---|---|
-| Backend tests | 734 passing, 3 deselected (network-marked) |
-| Frontend tests | 102 passing across 10 files |
-| Tables | 17 |
+| Backend tests | 813 passing, 3 deselected (network-marked) |
+| Frontend tests | 144 passing across 13 files |
+| Tables | 18 |
 | Projects | 5, all linked to a repo, all with a summary |
 | Commits ingested | 199, of which 197 have file-level detail |
 | Tasks / milestones / time logs | **0 / 0 / 0** |
@@ -93,7 +93,9 @@ Ordered by what I would actually do next.
 | **Point the remaining three projects at folders** | minutes each | Only `personal-projects` and `Organization_management_system` are checked out. `admin-dashboard`, `ride-native` and `course-finder-app` exist only on GitHub, so they have no Code tab. Clone them and set the folder in each brief. |
 | **Watch what agent runs cost** | ongoing | Spend went from $0.09 to $1.12 in one afternoon, almost all of it agent runs. A run is roughly $0.10--$0.15 with caching on. That is fine occasionally and not fine as a habit; the Spend page breaks it down by feature. |
 | **Consider a test-running tool** | ~half a day, and a real decision | The agent's honest weakness is that it cannot verify anything. A single fixed, project-configured command (not arbitrary shell) would let it check its own work. It is a meaningfully larger security surface than reading and writing files, which is why it was left out. |
-| **Frontend tests for the Code tab's own panels** | ~2h | `DiffView` and `AgentRuns` are tested; `CodeWorkspace` is not. |
+| **Frontend tests for `CodeWorkspace`** | ~1h | The file tree and the polling are the last untested part of the Code tab. |
+| **Set a leader on the other projects** | minutes | Only `personal-projects` has one. Without a leader, each change has to name its approver by hand. |
+| **Teach the outline more languages** | ~2h each | `impact.py` reads Python and JavaScript. Anything else gets line counts and an honest note that it cannot see definitions. |
 
 ### Larger, and genuinely optional
 

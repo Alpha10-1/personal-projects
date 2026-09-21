@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { FolderGit2, GitBranch, ShieldAlert } from "lucide-react";
+import { FolderGit2, GitBranch, ShieldAlert, UserCheck } from "lucide-react";
 
 import { api } from "@/lib/api";
+import { useAsync } from "@/lib/hooks";
 import { PRIORITIES, PROJECT_CATEGORIES, PROJECT_STATUSES } from "@/lib/constants";
 import AiSuggestions from "@/components/AiSuggestions";
 import { Badge, Button, ErrorNote, Field, Modal, Select } from "@/components/ui";
@@ -23,6 +24,7 @@ const EMPTY = {
   repo: "",
   local_path: "",
   protected_paths: "",
+  leader_id: "",
   progress_override: "",
   retro: "",
 };
@@ -36,6 +38,10 @@ function toForm(project) {
 
 export default function ProjectForm({ open, onClose, onSaved, project = null }) {
   const [form, setForm] = useState(() => toForm(project));
+  // Loaded here rather than passed in: the form is opened from four
+  // different places and threading the list through all of them would be
+  // four chances to forget.
+  const { data: people } = useAsync(() => api.get("/people"), []);
   const [showMore, setShowMore] = useState(false);
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -82,6 +88,7 @@ export default function ProjectForm({ open, onClose, onSaved, project = null }) 
         repo: text(form.repo),
         local_path: text(form.local_path),
         protected_paths: text(form.protected_paths),
+        leader_id: form.leader_id === "" ? null : Number(form.leader_id),
         progress_override:
           form.progress_override === "" ? null : Number(form.progress_override),
         retro: text(form.retro),
@@ -224,6 +231,29 @@ export default function ProjectForm({ open, onClose, onSaved, project = null }) 
             value={form.local_path}
             onChange={set("local_path")}
             placeholder="C:\\Users\\you\\repos\\project"
+          />
+        </Field>
+
+        <Field
+          label={
+            <span className="inline-flex items-center gap-1.5">
+              <UserCheck size={13} /> Project leader
+              <Badge tone="neutral">optional</Badge>
+            </span>
+          }
+          hint="Who reviews and approves changes to this project's files. Not a permission -- this app has no login -- but an edit is not written to disk until it is approved in someone's name, and the record says whose."
+        >
+          <Select
+            value={form.leader_id}
+            onChange={set("leader_id")}
+            includeBlank
+            blankLabel="Nobody yet"
+            options={(people || []).map((person) => ({
+              value: String(person.id),
+              label: person.role_title
+                ? `${person.name} — ${person.role_title}`
+                : person.name,
+            }))}
           />
         </Field>
 

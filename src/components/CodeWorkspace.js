@@ -37,6 +37,7 @@ import {
   Spinner,
 } from "@/components/ui";
 import DiffView from "@/components/DiffView";
+import CodeEditor from "@/components/CodeEditor";
 
 // Often enough to feel live while you alt-tab, rare enough that it is one
 // `git status` every few seconds on a local repository -- which costs
@@ -148,58 +149,6 @@ function TreeNode({ projectId, entry, depth, onOpenFile, selected }) {
   );
 }
 
-/** The file currently being looked at, with its line numbers. */
-function FileView({ projectId, path, onOpenInEditor }) {
-  const file = useAsync(
-    () => api.get(`/projects/${projectId}/workspace/file`, { path }),
-    [projectId, path],
-  );
-
-  const lines = useMemo(
-    () => (file.data?.content ?? "").replace(/\n$/, "").split("\n"),
-    [file.data],
-  );
-
-  if (file.loading) return <Spinner label={`Reading ${path}`} />;
-  if (file.error) return <ErrorNote error={file.error} />;
-  if (file.data?.binary) {
-    return (
-      <p className="p-4 text-xs text-[var(--text-muted)]">
-        {path} is a binary file ({file.data.size.toLocaleString()} bytes).
-      </p>
-    );
-  }
-
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between gap-2">
-        <code className="truncate text-xs text-[var(--text-secondary)]">{path}</code>
-        <Button variant="ghost" onClick={() => onOpenInEditor(path)}>
-          <ExternalLink size={12} /> Open in VS Code
-        </Button>
-      </div>
-      {file.data?.truncated ? (
-        <p className="text-[11px] text-[var(--warning)]">
-          Showing the first part only — the file is{" "}
-          {file.data.size.toLocaleString()} bytes.
-        </p>
-      ) : null}
-      <pre className="max-h-[32rem] overflow-auto rounded border border-[var(--border)] bg-[var(--surface-1)] text-[11px] leading-[1.55]">
-        <code className="block font-mono">
-          {lines.map((line, index) => (
-            <span key={index} className="flex whitespace-pre">
-              <span className="sticky left-0 w-12 shrink-0 select-none bg-[var(--surface-1)] pr-3 text-right text-[var(--text-muted)]">
-                {index + 1}
-              </span>
-              <span className="text-[var(--text-secondary)]">{line || " "}</span>
-            </span>
-          ))}
-        </code>
-      </pre>
-    </div>
-  );
-}
-
 function SearchPanel({ projectId, onOpenFile }) {
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState(null);
@@ -262,7 +211,7 @@ function SearchPanel({ projectId, onOpenFile }) {
   );
 }
 
-export default function CodeWorkspace({ project }) {
+export default function CodeWorkspace({ project, onChangeRaised }) {
   const [view, setView] = useState({ kind: "changes", path: null });
   const [notice, setNotice] = useState(null);
 
@@ -420,9 +369,13 @@ export default function CodeWorkspace({ project }) {
 
         <Card className="p-3">
           {view.kind === "file" ? (
-            <FileView
-              projectId={project.id}
+            <CodeEditor
+              // Remounted per file, which is what lets the editor keep no
+              // effects: switching files replaces it rather than resetting it.
+              key={view.path}
+              project={project}
               path={view.path}
+              onRaised={onChangeRaised}
               onOpenInEditor={openInEditor}
             />
           ) : (
