@@ -379,3 +379,61 @@ def test_the_survey_route_returns_both_the_kept_and_the_dropped(
     assert [g["title"] for g in body["already_done"]] == [
         "Add an endpoint to list widgets"
     ]
+
+
+# --- the model not honouring its own schema ------------------------------
+#
+# A tool schema's top-level `required` is enforced; `required` inside an
+# array's items is not. The first real run of this returned `features` as a
+# list of strings and took the whole request down with an AttributeError.
+
+
+def test_a_feature_returned_as_a_bare_string_is_still_usable():
+    assert survey.as_feature("Time tracking") == {
+        "name": "Time tracking",
+        "what_it_does": "Time tracking",
+        "where": [],
+        "state": "complete",
+    }
+
+
+def test_a_gap_returned_as_a_bare_string_is_kept_but_unverifiable():
+    gap = survey.as_gap("Add caching")
+    assert gap["title"] == "Add caching"
+    assert gap["look_for"] == []
+
+
+def test_nonsense_entries_are_dropped_rather_than_crashing():
+    assert survey.as_feature(None) is None
+    assert survey.as_feature({}) is None
+    assert survey.as_gap({"why": "no title"}) is None
+    assert survey.as_gap(12) is None
+
+
+def test_an_unknown_state_falls_back_rather_than_reaching_the_renderer():
+    assert survey.as_feature({"name": "X", "state": "half-done"})["state"] == "complete"
+
+
+def test_a_survey_of_bare_strings_gets_all_the_way_through(
+    db, project, repo, monkeypatch, configured
+):
+    """The regression, end to end."""
+    monkeypatch.setattr(
+        ai,
+        "structured",
+        model(
+            {
+                "what_it_is": "A service.",
+                "features": ["Widget listing", "Health checks"],
+                "gaps": ["Add rate limiting"],
+            }
+        ),
+    )
+    result = go(db, project)
+    assert len(result["outline"]["features"]) == 2
+    [note] = db.query(models.Note).filter_by(project_id=project.id).all()
+    assert "Widget listing" in note.body
+    # Unverifiable, so it is raised but marked as such rather than claimed
+    # to have been checked.
+    [suggestion] = db.query(models.Suggestion).all()
+    assert "Not verified" in " ".join(json.loads(suggestion.evidence))

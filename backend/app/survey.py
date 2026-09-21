@@ -182,6 +182,69 @@ SYSTEM = (
 )
 
 
+# --- taking the model's word with a pinch of salt ------------------------
+#
+# A tool schema's *top-level* `required` is enforced; `required` inside an
+# array's items is not. Asked for a list of objects, a model will sometimes
+# return a list of strings -- which it did on the first real run of this,
+# and which took the whole request down with an AttributeError deep inside
+# the renderer. Everything from the model is coerced here, once, so that
+# nothing downstream has to wonder.
+
+
+def as_feature(item) -> Optional[dict]:
+    """One feature, whatever shape it arrived in."""
+    if isinstance(item, str):
+        text = item.strip()
+        return {"name": text[:60], "what_it_does": text, "where": [], "state": "complete"} if text else None
+    if not isinstance(item, dict):
+        return None
+    name = str(item.get("name") or "").strip()
+    what = str(item.get("what_it_does") or "").strip()
+    if not name and not what:
+        return None
+    where = [str(w) for w in (item.get("where") or []) if w]
+    state = item.get("state")
+    return {
+        "name": name or what[:60],
+        "what_it_does": what or name,
+        "where": where,
+        "state": state if state in ("complete", "partial", "scaffolded") else "complete",
+    }
+
+
+def as_gap(item) -> Optional[dict]:
+    """One gap, or None if there is not enough of it to act on.
+
+    A gap with no title is not a gap. A gap with no `look_for` is kept but
+    will be marked unverified, because "we could not check this" is a
+    different thing from "we checked and it is missing".
+    """
+    if isinstance(item, str):
+        text = item.strip()
+        return {"title": text, "why": text, "look_for": []} if text else None
+    if not isinstance(item, dict):
+        return None
+    title = str(item.get("title") or "").strip()
+    if not title:
+        return None
+    return {
+        **{k: v for k, v in item.items() if k not in ("title", "why", "look_for")},
+        "title": title,
+        "why": str(item.get("why") or "").strip() or "No reason given.",
+        "look_for": [str(t).strip() for t in (item.get("look_for") or []) if str(t).strip()],
+    }
+
+
+def normalise(result: dict) -> dict:
+    """The model's answer, in the shape the rest of this module expects."""
+    return {
+        "what_it_is": str(result.get("what_it_is") or "").strip(),
+        "features": [f for f in map(as_feature, result.get("features") or []) if f],
+        "gaps": [g for g in map(as_gap, result.get("gaps") or []) if g],
+    }
+
+
 def significant(title: str) -> set[str]:
     words = {
         word.strip(".,:;()`\"'").lower()
@@ -278,14 +341,14 @@ def write_note(db: Session, project, result: dict) -> models.Note:
 
 def render_outline(result: dict) -> str:
     """The outline as Markdown, which is what a note is rendered as."""
-    lines = [result.get("what_it_is", "").strip(), ""]
-    features = result.get("features") or []
+    lines = [result["what_it_is"], ""]
+    features = result["features"]
     if features:
         lines.append("## What it does\n")
         for feature in features:
-            state = feature.get("state", "")
+            state = feature["state"]
             mark = {"complete": "", "partial": " *(partial)*", "scaffolded": " *(scaffolded)*"}
-            where = feature.get("where") or []
+            where = feature["where"]
             lines.append(
                 f"- **{feature['name']}**{mark.get(state, '')} — "
                 f"{feature['what_it_does']}"
@@ -318,6 +381,16 @@ def raise_gaps(db: Session, project, gaps: list[dict]) -> list[models.Suggestion
         elif not gap.get("verified", True):
             evidence.append(
                 "Not verified: the model named nothing specific to check for."
+            )
+        if gap.get("possibly_related"):
+            # Weaker than a `look_for` hit, so it warns rather than drops --
+            # but it is the check that would have caught a proposal to add
+            # per-project protected paths to a codebase that already had
+            # them under a name the model did not think to search for.
+            evidence.append(
+                "Worth checking: this repository already defines "
+                + ", ".join(f"`{n}`" for n in gap["possibly_related"][:5])
+                + ", which may already cover it."
             )
         if gap.get("area"):
             evidence.append(f"Would go in `{gap['area']}`.")
@@ -364,7 +437,8 @@ async def run(db: Session, project, *, raise_suggestions: bool = True) -> dict:
         project_id=project.id,
     )
 
-    checked = inventory.verify(root, result.get("gaps") or [], built)
+    result = normalise(result)
+    checked = inventory.verify(root, result["gaps"], built)
     kept, dropped = checked["gaps"], checked["already_done"]
 
     # And the board, which the repository cannot tell us about.
@@ -383,8 +457,8 @@ async def run(db: Session, project, *, raise_suggestions: bool = True) -> dict:
     return {
         "inventory": inv,
         "outline": {
-            "what_it_is": result.get("what_it_is"),
-            "features": result.get("features") or [],
+            "what_it_is": result["what_it_is"],
+            "features": result["features"],
         },
         "note_id": note.id,
         "gaps": surviving,

@@ -244,12 +244,18 @@ def index(root: Path) -> dict:
     """
     inventory = scan(root)
     names = set()
+    # word -> the definitions containing it, so "how common is this word
+    # here" is answerable without re-walking every symbol per gap.
+    word_index: dict[str, set[str]] = defaultdict(set)
     for module in inventory["modules"]:
         for symbol in module["symbols"]:
             names.add(symbol["name"].lower())
+            for word in words_of(symbol["name"]):
+                word_index[word].add(symbol["name"])
     return {
         "inventory": inventory,
         "names": names,
+        "word_index": word_index,
         "paths": {m["path"].lower() for m in inventory["modules"]}
         | {p.lower() for p in inventory["pages"] + inventory["components"]},
         "routes": {r["path"].lower() for r in inventory["routes"]},
@@ -291,6 +297,65 @@ def already_there(root: Path, term: str, built: dict) -> Optional[str]:
     return None
 
 
+# A word this long is worth comparing at all. Shorter than this and "list"
+# or "get" matches half the repository.
+DISTINCTIVE = 5
+
+# How many different definitions a word may appear in before it stops being
+# evidence of anything. `project` is in forty names here and says nothing;
+# `protected` is in two and says a great deal.
+COMMON_ENOUGH_TO_IGNORE = 4
+
+# Words that appear in a title without saying what the work is.
+EMPTY_WORDS = {
+    "expose", "configure", "override", "support", "provide", "create",
+    "improve", "better", "simple", "proper", "handle", "system", "should",
+    "feature", "option", "ability", "instead", "within", "across", "before",
+    "command", "endpoint", "endpoints", "automatically", "window",
+}
+
+CAMEL = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+
+
+def words_of(name: str) -> set[str]:
+    """An identifier split into the words it is made of.
+
+    Whole words, not substrings. Matching on substrings found `backup`
+    inside `FeedbackUpdate`, which is the kind of evidence that makes a
+    warning worse than no warning.
+    """
+    parts = CAMEL.sub(" ", name or "").replace("_", " ").replace("-", " ")
+    return {word.lower() for word in parts.split() if word}
+
+
+def related(title: str, built: dict) -> list[str]:
+    """Existing definitions that share a distinctive word with a proposed title.
+
+    Weaker evidence than a `look_for` hit, and treated as such: it warns
+    rather than discards. The case it exists for is real -- a model
+    proposed "configure protected file patterns per project" for a codebase
+    that already had `Project.protected_paths` and
+    `agent.protected_patterns`, and the gap survived only because it had
+    guessed different identifiers to search for.
+
+    It never drops anything, because it is deliberately imprecise: a gap
+    about paginating the activity feed shares a word with a dozen
+    functions and is still a real gap.
+    """
+    index = built.get("word_index") or {}
+    wanted = {
+        word
+        for word in words_of(title.replace("/", " "))
+        if len(word) >= DISTINCTIVE and word not in EMPTY_WORDS
+    }
+    hits: set[str] = set()
+    for word in wanted:
+        found = index.get(word) or set()
+        if 0 < len(found) <= COMMON_ENOUGH_TO_IGNORE:
+            hits.update(found)
+    return sorted(hits, key=str.lower)[:8]
+
+
 def verify(root: Path, gaps: list[dict], built: Optional[dict] = None) -> dict:
     """Split proposed gaps into the ones worth raising and the ones already done.
 
@@ -312,7 +377,13 @@ def verify(root: Path, gaps: list[dict], built: Optional[dict] = None) -> dict:
         if not terms:
             # Nothing to check it against. Kept, but marked, because a gap
             # that cannot be verified is not the same as one that was.
-            keep.append({**gap, "verified": False})
+            keep.append(
+                {
+                    **gap,
+                    "verified": False,
+                    "possibly_related": related(gap.get("title", ""), built),
+                }
+            )
             continue
         found = [(term, already_there(root, term, built)) for term in terms]
         evidence = [why for _, why in found if why]
@@ -325,7 +396,14 @@ def verify(root: Path, gaps: list[dict], built: Optional[dict] = None) -> dict:
                 }
             )
         else:
-            keep.append({**gap, "verified": True, "checked": terms})
+            keep.append(
+                {
+                    **gap,
+                    "verified": True,
+                    "checked": terms,
+                    "possibly_related": related(gap.get("title", ""), built),
+                }
+            )
 
     return {"gaps": keep, "already_done": dropped}
 

@@ -212,6 +212,29 @@ def _unwrap(exc: Exception) -> str:
     return f"The model call failed ({name})."
 
 
+def _unwrap_arguments(payload: dict, schema: dict) -> dict:
+    """Undo the model nesting the whole answer inside one stray key.
+
+    Seen in the wild: a survey came back as `{"parameter name": {...}}`,
+    with everything asked for one level down. Nothing was wrong with the
+    call or the schema -- the model simply wrapped it -- and the caller saw
+    an object with none of its fields and no error to explain why.
+
+    Unwrapped only when it is unambiguous: exactly one key, that key is not
+    itself part of the schema, and what it holds is an object. Anything
+    less clear-cut is left alone, because guessing at a payload's shape is
+    how a wrong answer becomes an invisible one.
+    """
+    if len(payload) != 1:
+        return payload
+    [(key, value)] = payload.items()
+    if not isinstance(value, dict):
+        return payload
+    if key in (schema.get("properties") or {}):
+        return payload
+    return value
+
+
 async def structured(
     *,
     system: str,
@@ -263,7 +286,7 @@ async def structured(
 
     for block in message.content:
         if getattr(block, "type", None) == "tool_use":
-            return dict(block.input or {})
+            return _unwrap_arguments(dict(block.input or {}), schema)
     raise AIFailed("The model returned nothing usable.")
 
 

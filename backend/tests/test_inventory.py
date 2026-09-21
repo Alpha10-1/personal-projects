@@ -220,3 +220,89 @@ def test_a_match_only_in_a_test_file_does_not_count_as_built(repo):
     run_git(repo, "-c", "user.email=t@e.com", "-c", "user.name=T", "commit", "-m", "wip")
     built = inventory.index(repo)
     assert inventory.already_there(repo, "test_rate_limiting_someday", built) is None
+
+
+# --- the weaker warning ---------------------------------------------------
+#
+# The exact-term check only works if the model guesses the right
+# identifier. On a real run it proposed "configure protected file patterns
+# per project" against a codebase that already had `protected_paths` and
+# `protected_patterns`, and the gap survived because it had searched for
+# `pp-agent-ignore` instead. This is the second line: a warning, never a
+# discard, because it is imprecise on purpose.
+
+
+def test_identifiers_are_split_into_whole_words():
+    assert inventory.words_of("protected_patterns") == {"protected", "patterns"}
+    assert inventory.words_of("FeedbackUpdate") == {"feedback", "update"}
+    assert inventory.words_of("MAX_READ_BYTES") == {"max", "read", "bytes"}
+
+
+def test_a_word_inside_another_word_is_not_a_match():
+    """`backup` is not in `FeedbackUpdate`, however much a substring search
+    would like it to be."""
+    assert "backup" not in inventory.words_of("FeedbackUpdate")
+
+
+@pytest.fixture
+def wordy(repo):
+    write(
+        repo / "app" / "agent.py",
+        "DEFAULT_PROTECTED = ()\n\n\ndef protected_patterns(raw):\n    return []\n",
+    )
+    run_git(repo, "add", "-A")
+    run_git(repo, "-c", "user.email=t@e.com", "-c", "user.name=T", "commit", "-m", "agent")
+    return inventory.index(repo)
+
+
+def test_a_distinctive_word_surfaces_what_already_exists(wordy):
+    found = inventory.related("Configure protected file patterns per project", wordy)
+    assert "DEFAULT_PROTECTED" in found
+    assert "protected_patterns" in found
+
+
+def test_a_word_in_too_many_definitions_is_not_evidence(repo):
+    for n in range(8):
+        write(repo / "app" / f"m{n}.py", f"def widget_thing_{n}():\n    pass\n")
+    run_git(repo, "add", "-A")
+    run_git(repo, "-c", "user.email=t@e.com", "-c", "user.name=T", "commit", "-m", "many")
+    built = inventory.index(repo)
+    assert inventory.related("Improve the widget experience", built) == []
+
+
+def test_filler_words_in_a_title_are_ignored(wordy):
+    assert inventory.related("Expose a configure option", wordy) == []
+
+
+def test_the_warning_never_discards_a_gap(repo, wordy):
+    """It is imprecise by design, so it may only warn.
+
+    Here the title matches `protected_patterns` on a word, but the terms
+    the model asked to be checked are genuinely absent -- so the gap stays,
+    carrying the warning.
+    """
+    result = inventory.verify(
+        repo,
+        [
+            {
+                "title": "Configure protected file patterns per project",
+                "why": "x",
+                "look_for": ["pp_agent_ignore", "agent_config_file"],
+            }
+        ],
+        wordy,
+    )
+    assert result["already_done"] == []
+    assert len(result["gaps"]) == 1
+    assert result["gaps"][0]["possibly_related"]
+
+
+def test_a_kept_gap_carries_the_warning(repo, wordy):
+    result = inventory.verify(
+        repo,
+        [{"title": "Configure protected file patterns", "why": "x", "look_for": ["pp_agent_ignore"]}],
+        wordy,
+    )
+    [kept] = result["gaps"]
+    assert kept["verified"] is True
+    assert "protected_patterns" in kept["possibly_related"]

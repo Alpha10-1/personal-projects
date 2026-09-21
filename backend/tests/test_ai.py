@@ -575,3 +575,45 @@ async def test_marking_the_tools_does_not_mutate_the_caller_s_list(monkeypatch):
     tools = [{"name": "a", "input_schema": {}}]
     await ai.converse(system="s", messages=[{"role": "user", "content": "x"}], tools=tools)
     assert tools == [{"name": "a", "input_schema": {}}]
+
+
+# --- the model wrapping its own answer -----------------------------------
+#
+# A real survey came back as {"parameter name": {...}} with everything one
+# level down. The call succeeded, the schema was fine, and the caller got
+# an object with none of its fields and nothing to say why.
+
+SURVEY_LIKE = {
+    "type": "object",
+    "properties": {"what_it_is": {"type": "string"}, "gaps": {"type": "array"}},
+}
+
+
+def test_a_stray_wrapper_key_is_unwrapped():
+    wrapped = {"parameter name": {"what_it_is": "A tracker.", "gaps": []}}
+    assert ai._unwrap_arguments(wrapped, SURVEY_LIKE) == {
+        "what_it_is": "A tracker.",
+        "gaps": [],
+    }
+
+
+def test_a_correct_answer_is_left_exactly_as_it_is():
+    answer = {"what_it_is": "A tracker.", "gaps": []}
+    assert ai._unwrap_arguments(answer, SURVEY_LIKE) == answer
+
+
+def test_a_single_real_field_is_not_mistaken_for_a_wrapper():
+    """A schema field that happens to hold an object, and happens to be the
+    only one returned, must survive untouched."""
+    schema = {"type": "object", "properties": {"result": {"type": "object"}}}
+    answer = {"result": {"a": 1}}
+    assert ai._unwrap_arguments(answer, schema) == answer
+
+
+def test_a_single_key_holding_something_other_than_an_object_is_left_alone():
+    assert ai._unwrap_arguments({"mystery": [1, 2]}, SURVEY_LIKE) == {"mystery": [1, 2]}
+
+
+def test_two_stray_keys_are_too_ambiguous_to_unwrap():
+    payload = {"a": {"x": 1}, "b": {"y": 2}}
+    assert ai._unwrap_arguments(payload, SURVEY_LIKE) == payload
