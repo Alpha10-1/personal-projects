@@ -229,6 +229,7 @@ async def structured(
     without anyone having to remember a second argument.
     """
     feature = feature or tool_name
+    privacy.check_outgoing(system, prompt)
     client = _client(timeout)
     started = time.monotonic()
     try:
@@ -281,6 +282,7 @@ async def research(
     point: an improvement suggested because a real page says so can be
     checked, and one the model remembered cannot.
     """
+    privacy.check_outgoing(system, prompt)
     client = _client(timeout)
     started = time.monotonic()
     try:
@@ -341,6 +343,7 @@ async def stream(
     seconds reads as a hang, and the floater is meant to feel like a
     conversation.
     """
+    privacy.check_outgoing(system, *(m.get("content") for m in messages))
     client = _client()
     started = time.monotonic()
     wrote_something = False

@@ -194,7 +194,29 @@ whether to offer any of it. With no key the routes answer 503 with that
 reason and the buttons are not rendered at all — a disabled feature should be
 invisible, not broken.
 
-**This is the only part of the system that sends your data anywhere.** What
+**Two rules govern what leaves this machine.**
+
+`PP_AI_EGRESS=off` in `backend/.env` turns the assistant off entirely --
+one setting, checked at the single function that builds the API client, so
+no route can bypass it. The tracker itself is unaffected: the board, the
+review rules, the computed commit timeline and the spend ledger never
+touched the network.
+
+Separately, and with no setting to turn it off: **nothing identifying a
+Power BI report, workspace or dataset is ever sent.** Those sit over data
+that may carry row-level security, where what a person may see depends on
+who they are, and copying it somewhere that permission model does not reach
+defeats the point. No prompt-building code reads the dashboards table, and
+every outgoing call is checked for those identifiers before it goes. The
+check matches ids and URLs, never names -- a report called "Sales" must not
+blocklist the word.
+
+Power BI is currently connected with a service principal, which is an
+application identity and therefore not subject to RLS the way a person is.
+Reading as yourself needs delegated sign-in: see
+[docs/powerbi-delegated-access.md](docs/powerbi-delegated-access.md).
+
+**The assistant is the only part of the system that sends your data anywhere.** What
 goes out is built in `assistant.py` from explicit queries, so it can be read
 rather than inferred from a prompt string, and everything is length-capped
 with truncation marked so the model can tell it was cut off.

@@ -26,6 +26,7 @@ from app import (
     models,
     planner,
     planner_prompts,
+    privacy,
     spend,
 )
 from app.db import get_db
@@ -138,13 +139,18 @@ async def chat(request: ChatRequest, db: Session = Depends(get_db)):
     if not turns:
         raise HTTPException(status_code=400, detail="No messages")
 
+    # Checked here as well as inside ai.stream: once a StreamingResponse has
+    # begun, the 200 and the headers are gone and a refusal can only travel
+    # in-band as an SSE event. Checking first is what makes a 403 possible.
+    privacy.check_outgoing(system, *(t["content"] for t in turns))
+
     async def events():
         try:
             async for chunk in ai.stream(
                 system=system, messages=turns, feature="chat"
             ):
                 yield ai.sse("delta", chunk)
-        except (ai.AIFailed, ai.AINotConfigured) as exc:
+        except (ai.AIFailed, ai.AINotConfigured, privacy.SensitiveDataBlocked) as exc:
             # The 200 and headers went out with the first byte, so a failure
             # can only be reported inside the stream.
             yield ai.sse("error", str(exc))
@@ -512,6 +518,11 @@ async def brainstorm_turn(
     project = db.get(models.Project, session.project_id) if session.project_id else None
     system = assistant.brainstorm_system(db, project)
 
+    # Checked here as well as inside ai.stream: once a StreamingResponse has
+    # begun, the 200 and the headers are gone and a refusal can only travel
+    # in-band as an SSE event. Checking first is what makes a 403 possible.
+    privacy.check_outgoing(system, *(t["content"] for t in turns))
+
     async def events():
         collected: list[str] = []
         try:
@@ -523,7 +534,7 @@ async def brainstorm_turn(
             ):
                 collected.append(chunk)
                 yield ai.sse("delta", chunk)
-        except (ai.AIFailed, ai.AINotConfigured) as exc:
+        except (ai.AIFailed, ai.AINotConfigured, privacy.SensitiveDataBlocked) as exc:
             yield ai.sse("error", str(exc))
 
         if collected:
@@ -795,6 +806,11 @@ async def ask_about_project(
     system = assistant.ask_system(history.as_text(data, project))
     question = request.question.strip()
 
+    # Checked here as well as inside ai.stream: once a StreamingResponse has
+    # begun, the 200 and the headers are gone and a refusal can only travel
+    # in-band as an SSE event. Checking first is what makes a 403 possible.
+    privacy.check_outgoing(system, question)
+
     async def events():
         try:
             async for chunk in ai.stream(
@@ -804,7 +820,7 @@ async def ask_about_project(
                 project_id=project.id,
             ):
                 yield ai.sse("delta", chunk)
-        except (ai.AIFailed, ai.AINotConfigured) as exc:
+        except (ai.AIFailed, ai.AINotConfigured, privacy.SensitiveDataBlocked) as exc:
             yield ai.sse("error", str(exc))
         yield ai.sse("done", True)
 

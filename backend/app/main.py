@@ -10,7 +10,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
+from app import privacy
 from app.db import DB_PATH, init_db
 from app.routes import (
     activity,
@@ -49,6 +51,16 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(privacy.SensitiveDataBlocked)
+def sensitive_data_blocked(request, exc):
+    """Turned into a response once, here, rather than caught route by route.
+
+    403 rather than 500: the server understood perfectly and refused. It is
+    not a fault to retry, and it should not read like one.
+    """
+    return JSONResponse(status_code=403, content={"detail": str(exc)})
 
 
 @app.get("/health")

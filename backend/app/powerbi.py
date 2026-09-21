@@ -72,6 +72,10 @@ def is_configured() -> bool:
 
 
 def status() -> dict:
+    # The identity this connects with is an application, not a person, so
+    # anything it reads is read with the application's access. That is fine
+    # for refresh state and wrong for dataset contents -- see
+    # docs/powerbi-delegated-access.md.
     configured = is_configured()
     missing = [
         name
