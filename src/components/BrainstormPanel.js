@@ -6,6 +6,7 @@ import { Lightbulb, Plus, Send, Sprout, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { streamBrainstorm, useAiStatus } from "@/lib/ai";
 import { useAsync } from "@/lib/hooks";
+import Markdown from "@/components/Markdown";
 import { formatDate } from "@/lib/format";
 import {
   Badge,
@@ -209,13 +210,17 @@ function Session({ id, projects, onDeleted }) {
             className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
           >
             <div
-              className={`max-w-[85%] whitespace-pre-wrap rounded-lg px-3 py-2 text-sm ${
+              className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
                 message.role === "user"
-                  ? "bg-[var(--accent)] text-white"
+                  ? "whitespace-pre-wrap bg-[var(--accent)] text-white"
                   : "bg-[var(--surface-2)]"
               }`}
             >
-              {message.content}
+              {message.role === "user" ? (
+                message.content
+              ) : (
+                <Markdown>{message.content}</Markdown>
+              )}
               {streaming && index === messages.length - 1 && message.role === "assistant" ? (
                 <span className="ml-0.5 animate-pulse">▌</span>
               ) : null}

@@ -358,3 +358,102 @@ def test_the_tracker_context_is_bounded(db, make):
     context = assistant.tracker_context(db)
 
     assert len(context) <= ai.MAX_CONTEXT_CHARS + 60
+
+
+# --- A stream that says nothing ----------------------------------------------
+
+
+class _Stream:
+    """A stream that yields the given chunks and then ends for the given
+    reason."""
+
+    def __init__(self, chunks, stop_reason="end_turn"):
+        self._chunks = chunks
+        self._stop_reason = stop_reason
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    @property
+    def text_stream(self):
+        async def gen():
+            for chunk in self._chunks:
+                yield chunk
+
+        return gen()
+
+    async def get_final_message(self):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(stop_reason=self._stop_reason, usage=None)
+
+
+def _client_yielding(stream, monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        ai,
+        "_client",
+        lambda timeout=None: SimpleNamespace(
+            messages=SimpleNamespace(stream=lambda **kw: stream)
+        ),
+    )
+
+
+@pytest.mark.anyio
+async def test_a_reply_that_is_all_thinking_says_so_instead_of_nothing(monkeypatch):
+    """The real failure this guards: the chat model thinks by default, and
+    thinking counts against max_tokens. A hard question spent the whole
+    budget reasoning, produced no text block, and the floater showed an empty
+    bubble with no error anywhere."""
+    _client_yielding(_Stream([], stop_reason="max_tokens"), monkeypatch)
+
+    with pytest.raises(ai.AIFailed, match="ran out of room"):
+        [chunk async for chunk in ai.stream(system="s", messages=[])]
+
+
+@pytest.mark.anyio
+async def test_an_answer_that_arrived_is_not_second_guessed(monkeypatch):
+    """Hitting the cap after writing something is ordinary truncation, not
+    the silent failure -- the partial answer is worth more than an error."""
+    _client_yielding(_Stream(["half an ans"], stop_reason="max_tokens"), monkeypatch)
+
+    out = [chunk async for chunk in ai.stream(system="s", messages=[])]
+
+    assert out == ["half an ans"]
+
+
+@pytest.mark.anyio
+async def test_an_ordinary_empty_answer_is_not_an_error(monkeypatch):
+    """A model that simply had nothing to add stopped for its own reasons;
+    only running out of budget is worth reporting."""
+    _client_yielding(_Stream([], stop_reason="end_turn"), monkeypatch)
+
+    assert [chunk async for chunk in ai.stream(system="s", messages=[])] == []
+
+
+@pytest.mark.anyio
+async def test_chat_asks_for_low_effort_so_thinking_stays_cheap(monkeypatch):
+    """Measured at 716 output tokens against 2,623 for the same question at
+    the default."""
+    from types import SimpleNamespace
+
+    seen = {}
+
+    def capture(**kwargs):
+        seen.update(kwargs)
+        return _Stream(["hi"])
+
+    monkeypatch.setattr(
+        ai,
+        "_client",
+        lambda timeout=None: SimpleNamespace(messages=SimpleNamespace(stream=capture)),
+    )
+
+    [chunk async for chunk in ai.stream(system="s", messages=[])]
+
+    assert seen["output_config"] == {"effort": "low"}
+    assert seen["max_tokens"] == ai.MAX_CHAT_TOKENS

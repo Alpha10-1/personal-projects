@@ -25,7 +25,7 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import ai, models
+from app import ai, formatting, models
 
 PROJECT_STATUSES = ["idea", "planning", "active", "on_hold", "done", "archived"]
 PROJECT_CATEGORIES = ["research", "build", "analysis", "learning", "ops", "other"]
@@ -338,7 +338,7 @@ CHAT_SYSTEM = (
     "Be direct and short. Answer from the data given and cite it by id "
     "(#12) so they can check you. If the data does not cover the question, "
     "say so plainly instead of guessing. No preamble, no summarising the "
-    "question back."
+    "question back.\n\n" + formatting.STRUCTURED
 )
 
 
@@ -759,7 +759,7 @@ BRAINSTORM_SYSTEM = (
     "genuinely change your advice.\n"
     "- Short. Two or three paragraphs at most, no headers, and no bullet "
     "lists unless they are actually a list of things.\n"
-    "- Never open by restating what they said."
+    "- Never open by restating what they said.\n\n" + formatting.INLINE
 )
 
 
@@ -991,7 +991,8 @@ ASK_SYSTEM = (
     "detail is missing.\n"
     "- Never infer a feature exists because it would be normal for it to. If "
     "no commit mentions authentication, you do not know that there is any.\n"
-    "- Short and direct. No preamble, no restating the question."
+    "- Short and direct. No preamble, no restating the question.\n\n"
+    + formatting.STRUCTURED
 )
 
 

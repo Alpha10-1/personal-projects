@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { MessageSquare, Send, Square, X } from "lucide-react";
 
 import { streamChat, useAiStatus } from "@/lib/ai";
+import Markdown from "@/components/Markdown";
 import { Button } from "@/components/ui";
 
 const OPENERS = [
@@ -17,13 +18,15 @@ function Bubble({ role, content, streaming }) {
   return (
     <div className={`flex ${mine ? "justify-end" : "justify-start"}`}>
       <div
-        className={`max-w-[85%] whitespace-pre-wrap rounded-lg px-3 py-2 text-sm ${
+        className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
           mine
-            ? "bg-[var(--accent)] text-white"
+            ? "whitespace-pre-wrap bg-[var(--accent)] text-white"
             : "bg-[var(--surface-2)] text-[var(--text-primary)]"
         }`}
       >
-        {content}
+        {/* What you typed is shown as you typed it; only the model's side is
+            Markdown, because your asterisks are probably asterisks. */}
+        {mine ? content : <Markdown>{content}</Markdown>}
         {streaming ? <span className="ml-0.5 animate-pulse">▌</span> : null}
       </div>
     </div>

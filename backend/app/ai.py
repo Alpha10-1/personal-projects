@@ -38,7 +38,20 @@ MIN_DRAFT_CHARS = 12
 # repeatedly while a form is open -- so it gets the tighter cap.
 MAX_CONTEXT_CHARS = 6_000
 MAX_SUGGEST_TOKENS = 900
-MAX_CHAT_TOKENS = 2_000
+
+# Thinking counts against max_tokens, and the chat model thinks by default.
+# At 2,000 a hard question spent the whole budget reasoning and the reply
+# came back as a single thinking block with no text in it -- the floater just
+# showed nothing. This is a ceiling, not a spend: with effort held low a real
+# answer costs around 700 output tokens, and the headroom only exists so a
+# question that needs more thinking still gets an answer out.
+MAX_CHAT_TOKENS = 8_000
+
+# Chat should feel immediate. Low effort answers the same questions with
+# roughly a third of the output tokens of the default, which on a personal
+# tracker is the right trade -- measured at 716 against 2,623 on the same
+# question.
+CHAT_EFFORT = "low"
 MAX_REVIEW_TOKENS = 2_500
 # A plan carries several whole options, each with milestones and tasks, so it
 # needs more room than a review of the same project would.
@@ -297,6 +310,7 @@ async def stream(
     messages: list[dict],
     model: str = CHAT_MODEL,
     max_tokens: int = MAX_CHAT_TOKENS,
+    effort: str = CHAT_EFFORT,
     feature: str = "chat",
     project_id: Optional[int] = None,
 ) -> AsyncIterator[str]:
@@ -308,14 +322,17 @@ async def stream(
     """
     client = _client()
     started = time.monotonic()
+    wrote_something = False
     try:
         async with client.messages.stream(
             model=model,
             max_tokens=max_tokens,
             system=system,
             messages=messages,
+            output_config={"effort": effort},
         ) as streamed:
             async for chunk in streamed.text_stream:
+                wrote_something = True
                 yield chunk
             # Only available once the stream is drained, which is why this
             # sits inside the context manager rather than after it.
@@ -326,6 +343,16 @@ async def stream(
         raise AIFailed(reason) from exc
 
     _meter(feature, model, getattr(final, "usage", None), project_id, started)
+
+    # Silence is the one failure a stream cannot show. If the budget went
+    # entirely on thinking there is no text block at all, and without this
+    # the user watches the cursor blink and then stop, with nothing said and
+    # nothing logged as wrong.
+    if not wrote_something and getattr(final, "stop_reason", None) == "max_tokens":
+        raise AIFailed(
+            "The answer ran out of room before it was written -- the whole "
+            "budget went on working it out. Try a narrower question."
+        )
 
 
 def sse(event: str, data: Any) -> str:

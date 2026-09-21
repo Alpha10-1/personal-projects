@@ -6,6 +6,7 @@ import { BookOpen, Layers, Send, Sparkles } from "lucide-react";
 import { API_URL, ApiError, api } from "@/lib/api";
 import { useAiStatus } from "@/lib/ai";
 import { useAsync } from "@/lib/hooks";
+import Markdown from "@/components/Markdown";
 import {
   Badge,
   Button,
@@ -226,7 +227,7 @@ export default function ProjectHistory({ project }) {
               ) : null
             }
           />
-          <div className="whitespace-pre-wrap px-4 py-3 text-sm">{summary.note}</div>
+          <Markdown className="px-4 py-3 text-sm">{summary.note}</Markdown>
         </Card>
       ) : null}
 
@@ -282,8 +283,8 @@ export default function ProjectHistory({ project }) {
 
             {asking && !answer ? <Spinner label="Reading the history" /> : null}
             {answer ? (
-              <div className="whitespace-pre-wrap rounded-lg bg-[var(--surface-2)] px-3 py-2 text-sm">
-                {answer}
+              <div className="rounded-lg bg-[var(--surface-2)] px-3 py-2 text-sm">
+                <Markdown>{answer}</Markdown>
                 {asking ? <span className="ml-0.5 animate-pulse">▌</span> : null}
               </div>
             ) : null}
