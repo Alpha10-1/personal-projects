@@ -193,6 +193,12 @@ RULE_EXPLANATIONS = {
         "A merged pull request names this task, which usually means the work "
         "it describes has landed."
     ),
+    "inventory_gap": (
+        "The whole repository was read -- every module, route, table and "
+        "page -- and this is something it does not do yet. Before being "
+        "raised it was searched for, so anything already built was "
+        "discarded rather than suggested."
+    ),
     "history_summary": (
         "The whole commit history of the linked repository was read, and the "
         "project's summary does not describe what the commits show was built."
@@ -203,6 +209,10 @@ RULE_EXPLANATIONS = {
 # write and where, rather than leaving it to be inferred from a field name.
 APPLIES = {
     ("project", "summary"): "Replaces this project's summary with the proposed text.",
+    ("project", "task"): (
+        "Adds this to the project's board as a todo, with the reasoning as "
+        "its notes. Nothing else changes, and no code is written."
+    ),
     ("task", "status"): (
         "Moves this task to the proposed status, exactly as changing it by "
         "hand would -- including stamping its completion time if it becomes "

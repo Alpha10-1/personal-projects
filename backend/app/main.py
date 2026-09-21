@@ -21,6 +21,7 @@ from app.routes import (
     code,
     dashboard,
     dashboards,
+    inventory,
     library,
     milestones,
     people,
@@ -86,3 +87,4 @@ app.include_router(ai.router)
 app.include_router(workspace.router)
 app.include_router(agent.router)
 app.include_router(code.router)
+app.include_router(inventory.router)

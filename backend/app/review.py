@@ -380,6 +380,25 @@ def apply(db: Session, suggestion: models.Suggestion) -> None:
         project.summary = suggestion.proposed_value
         return
 
+    if suggestion.target_type == "project" and suggestion.field == "task":
+        project = db.get(models.Project, suggestion.target_id)
+        if project is None:
+            raise LookupError(f"Project {suggestion.target_id} no longer exists")
+        # A gap becomes work, which is the only sensible thing to do with
+        # "this is missing". Marked `agent` like anything else the system
+        # wrote, so the board never blurs what you decided with what was
+        # proposed to you.
+        db.add(
+            models.Task(
+                project_id=project.id,
+                title=suggestion.proposed_value,
+                notes=suggestion.rationale,
+                status="todo",
+                source="agent",
+            )
+        )
+        return
+
     if suggestion.target_type != "task" or suggestion.field != "status":
         raise ValueError(
             f"Don't know how to apply {suggestion.target_type}.{suggestion.field}"
