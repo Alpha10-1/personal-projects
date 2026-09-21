@@ -16,6 +16,7 @@ from app import privacy
 from app.db import DB_PATH, init_db
 from app.routes import (
     activity,
+    agent,
     ai,
     dashboard,
     dashboards,
@@ -27,6 +28,7 @@ from app.routes import (
     review,
     tasks,
     time_logs,
+    workspace,
 )
 
 
@@ -80,3 +82,5 @@ app.include_router(dashboards.router)
 app.include_router(people.router)
 app.include_router(personal.router)
 app.include_router(ai.router)
+app.include_router(workspace.router)
+app.include_router(agent.router)

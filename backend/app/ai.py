@@ -67,6 +67,13 @@ REQUEST_TIMEOUT = 60.0
 MAX_SEARCHES = 5
 RESEARCH_TIMEOUT = 180.0
 
+# The coding agent. Each turn carries the files it has read so far, so the
+# input grows through a run and the output has to hold a whole file when it
+# rewrites one -- neither of which the chat budgets were sized for. The
+# timeout is per turn, not per run; a run's own ceiling is a turn count.
+MAX_AGENT_TOKENS = 16_000
+AGENT_TIMEOUT = 180.0
+
 
 class AINotConfigured(RuntimeError):
     """No API key, or the SDK isn't installed."""
@@ -258,6 +265,50 @@ async def structured(
         if getattr(block, "type", None) == "tool_use":
             return dict(block.input or {})
     raise AIFailed("The model returned nothing usable.")
+
+
+async def converse(
+    *,
+    system: str,
+    messages: list[dict],
+    tools: list[dict],
+    model: str = CHAT_MODEL,
+    max_tokens: int = MAX_AGENT_TOKENS,
+    timeout: float = AGENT_TIMEOUT,
+    feature: str = "agent",
+    project_id: Optional[int] = None,
+) -> Any:
+    """One turn of a tool-using conversation, returning the raw message.
+
+    The loop that feeds results back lives in `agent.py`, not here. This
+    module's job is to be the single place data leaves the machine, and a
+    loop is a different concern that would bury the thing worth auditing.
+    What this keeps is the part that must not be skipped: the privacy check
+    over *everything* being sent -- system, every message, and the tool
+    definitions -- and the ledger entry.
+
+    Tool results are the interesting case for privacy. Ordinary calls send
+    a prompt this codebase assembled; here, file contents the model asked
+    for go out on the next turn. Serialising the whole message list and
+    checking that is the only version that covers them.
+    """
+    privacy.check_outgoing(system, json.dumps(messages), json.dumps(tools))
+    client = _client(timeout)
+    started = time.monotonic()
+    try:
+        message = await client.messages.create(
+            model=model,
+            max_tokens=max_tokens,
+            system=system,
+            messages=messages,
+            tools=tools,
+        )
+    except Exception as exc:
+        reason = _unwrap(exc)
+        _meter(feature, model, None, project_id, started, ok=False, error=reason)
+        raise AIFailed(reason) from exc
+    _meter(feature, model, message.usage, project_id, started)
+    return message
 
 
 async def research(

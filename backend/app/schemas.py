@@ -63,6 +63,7 @@ class ProjectCreate(BaseModel):
     stakeholder: Optional[str] = None
     tech_stack: Optional[str] = None
     repo: Optional[str] = Field(default=None, max_length=255)
+    local_path: Optional[str] = Field(default=None, max_length=1024)
     workspace: Workspace = "work"
     progress_override: Optional[int] = Field(default=None, ge=0, le=100)
     retro: Optional[str] = None
@@ -83,6 +84,7 @@ class ProjectUpdate(BaseModel):
     stakeholder: Optional[str] = None
     tech_stack: Optional[str] = None
     repo: Optional[str] = Field(default=None, max_length=255)
+    local_path: Optional[str] = Field(default=None, max_length=1024)
     workspace: Annotated[Optional[Workspace], NoNull] = None
     progress_override: Optional[int] = Field(default=None, ge=0, le=100)
     retro: Optional[str] = None
@@ -103,6 +105,7 @@ class ProjectOut(ORMModel):
     stakeholder: Optional[str]
     tech_stack: Optional[str]
     repo: Optional[str]
+    local_path: Optional[str]
     workspace: Workspace
     progress_override: Optional[int]
     retro: Optional[str]

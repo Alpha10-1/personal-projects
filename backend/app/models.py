@@ -73,6 +73,18 @@ class Project(Base):
     # "owner/name" on GitHub. Activity in this repo is attributed to this
     # project, which is the cheapest linkage that is actually reliable.
     repo = Column(String(255), nullable=True, index=True)
+    # Where the checkout actually sits on this machine. Separate from `repo`
+    # because the two answer different questions: `repo` says whose history
+    # to ingest, this says which folder to read right now. A project can
+    # easily have one without the other -- a repo you have not cloned, or a
+    # folder you have not pushed anywhere.
+    local_path = Column(String(1024), nullable=True)
+    # Glob patterns, one per line, naming the parts of this project nobody
+    # gets to change without a person looking first. Empty means the
+    # built-in list in `agent.py` applies; the point of the column is that
+    # "core" differs per project -- a migration folder here, a pricing
+    # module there -- and only the person who owns the project knows which.
+    protected_paths = Column(Text, nullable=True)
 
     # work | personal. Personal projects are deliberately outside the
     # analyst's reach: no findings, no suggestion rules, no scheduled run.
@@ -528,3 +540,73 @@ class AiUsage(Base):
     ok = Column(Boolean, nullable=False, default=True, index=True)
     error = Column(String(255), nullable=True)
     seconds = Column(Float, nullable=True)
+
+
+class AgentRun(Base):
+    """One attempt by the coding agent to carry out an instruction.
+
+    The run never touches the working tree while it is thinking. Every write
+    the model makes goes into an overlay held in memory, and what lands in
+    this row is a *proposal*: the new contents of each file it wants to
+    change, plus the diff that would produce. Applying is a separate,
+    explicit step -- the same propose-don't-apply split the suggestion rules
+    use, for the same reason, except that here the thing being changed is
+    source code rather than a due date.
+
+    Why a row rather than a transient job: a run costs money and takes
+    minutes, and the answer has to survive a page reload, a restart and a
+    second opinion. Keeping it also means "what has this thing done to my
+    repositories" is a query rather than a memory.
+    """
+
+    __tablename__ = "agent_runs"
+
+    id = Column(Integer, primary_key=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
+    # Optional: a run started from a task carries the link back, so the
+    # board can show that work was attempted and what came of it.
+    task_id = Column(Integer, ForeignKey("tasks.id"), nullable=True, index=True)
+
+    instruction = Column(Text, nullable=False)
+
+    # running | proposed | applied | discarded | failed
+    #
+    # `proposed` is the resting state of a successful run: there is a diff
+    # and nobody has decided yet. There is deliberately no state between
+    # `proposed` and `applied` -- review is a thing a person does, not a
+    # status the system sets.
+    status = Column(String(20), nullable=False, default="running", index=True)
+
+    # Set when the run touched a path the project marks as protected. The
+    # run can then never be auto-applied, whatever the request asked for,
+    # and the UI says which paths did it.
+    review_required = Column(Boolean, nullable=False, default=False)
+    review_reason = Column(Text, nullable=True)
+
+    # Whether the caller asked for the result to be written out without a
+    # further click. Recorded rather than inferred, so an applied run can
+    # always be told apart from one a person looked at first.
+    auto_apply = Column(Boolean, nullable=False, default=False)
+
+    # The model's own account of what it did and what it did not do.
+    summary = Column(Text, nullable=True)
+    # JSON: [{"path":..., "action": "modify|create|delete", "content":...}]
+    # The whole new file, not a patch. Patches have to be applied to
+    # something, and the something may have changed under us; full contents
+    # plus a recorded base commit makes staleness detectable.
+    changes_json = Column(Text, nullable=True)
+    # The unified diff, computed once at proposal time and stored, so the
+    # review screen shows exactly what was proposed even if the tree moves.
+    diff = Column(Text, nullable=True)
+
+    # The commit the run reasoned against. If HEAD has moved by the time
+    # someone applies, that is worth saying out loud.
+    base_sha = Column(String(40), nullable=True)
+
+    model = Column(String(80), nullable=True)
+    turns = Column(Integer, nullable=False, default=0)
+    error = Column(Text, nullable=True)
+
+    created_at = Column(DateTime, default=utcnow, index=True)
+    finished_at = Column(DateTime, nullable=True)
+    applied_at = Column(DateTime, nullable=True)
