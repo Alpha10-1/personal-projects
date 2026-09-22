@@ -25,6 +25,7 @@ cache misses and the answer is recomputed rather than being quietly stale.
 
 import hashlib
 import json
+import re
 from typing import Optional
 
 from sqlalchemy import select
@@ -143,11 +144,95 @@ SYSTEM = (
     "says; a reader who wanted `i += 1` explained would not have asked.\n"
     "- If a guard or an odd-looking branch exists, work out what it is "
     "for and say so. That is usually the most useful thing you can offer.\n"
+    "- Not every selection is a definition. When you are told the "
+    "highlight is a comment, an import or a few loose lines, answer it "
+    "as what it is and keep it short, rather than dressing it up as a "
+    "function with callers.\n"
     "- Say what you cannot tell. A short honest answer beats a confident "
     "wrong one, and the person reading this will act on it.\n"
     + "\n"
     + formatting.INLINE
 )
+
+
+# The shapes the model actually returns, as opposed to the ones the schema
+# asks for. A tool schema is a strong hint, not a guarantee: asked for a
+# list of consequences it will sometimes answer with one paragraph, or with
+# a paragraph of Markdown bullets, and asked for a list of `{lines, what}`
+# steps it will sometimes answer with a list of sentences.
+#
+# None of that is worth failing over, and it must never reach the browser
+# unflattened -- a string where a list was expected used to crash the panel
+# rather than render. So the shape is fixed here, once, before the answer
+# is cached or returned.
+LIST_FIELDS = ("walkthrough", "if_you_change_it", "watch_out", "unknowns")
+TEXT_FIELDS = ("summary", "role_in_the_system", "shared_state")
+
+BULLET = re.compile(r"^\s*(?:[-*\u2022]|\d+[.)])\s+")
+
+
+def as_list(value) -> list:
+    """Whatever came back, as a list of items.
+
+    A paragraph of Markdown bullets becomes one item per bullet, because
+    that is plainly what was meant; a paragraph of prose stays one item.
+    """
+    if value is None or value == "":
+        return []
+    if isinstance(value, list):
+        return [item for item in value if item not in (None, "")]
+    if not isinstance(value, str):
+        return [value]
+    bullets = [
+        BULLET.sub("", line).strip()
+        for line in value.splitlines()
+        if BULLET.match(line)
+    ]
+    if bullets:
+        return [line for line in bullets if line]
+    return [value.strip()]
+
+
+def as_text(value) -> str:
+    if isinstance(value, list):
+        return "\n".join(str(item) for item in value if item)
+    return "" if value is None else str(value)
+
+
+def as_step(item) -> dict:
+    """One walkthrough step, whether it arrived as an object or a sentence."""
+    if isinstance(item, dict):
+        what = as_text(item.get("what") or item.get("text") or item.get("step"))
+        lines = item.get("lines")
+        return {
+            "lines": str(lines) if lines not in (None, "") else None,
+            "what": what,
+        }
+    return {"lines": None, "what": as_text(item)}
+
+
+def normalise(answer: dict) -> dict:
+    """The answer in the shape the panel expects, whatever the model sent.
+
+    Lenient on purpose. The alternative -- rejecting the answer because a
+    list arrived as a paragraph -- would throw away a perfectly good
+    explanation over its packaging, and would do it most often on the
+    selections that are hardest to answer in lists anyway.
+    """
+    out = {key: value for key, value in answer.items() if key not in LIST_FIELDS}
+    for key in TEXT_FIELDS:
+        if key in out:
+            out[key] = as_text(out[key])
+    for key in LIST_FIELDS:
+        if key not in answer:
+            continue
+        items = as_list(answer[key])
+        out[key] = (
+            [as_step(item) for item in items]
+            if key == "walkthrough"
+            else [as_text(item) for item in items]
+        )
+    return out
 
 
 def digest(content: str, start: int, end: int) -> str:
@@ -195,6 +280,22 @@ def build_prompt(path: str, text: str, start: int, end: int, facts: dict) -> str
         f"# The selection -- lines {start} to {end}, this is what to explain\n\n"
         "```\n" + numbered(lines[start - 1 : end], start)[:MAX_SELECTION_CHARS] + "\n```\n"
     )
+
+    # Not every highlight is a definition, and the ones that are not
+    # need saying so. Left to itself the model will write a paragraph
+    # about the architectural role of three import lines, which is the
+    # kind of answer that teaches you to stop asking.
+    selected = facts.get("selection") or {}
+    if selected.get("hint"):
+        parts.append(
+            "# What was highlighted\n\n"
+            f"This is {selected['what']}, not a definition. Say what "
+            "these lines are for and stop there. Do not invent a caller, "
+            "a purpose or a blast radius for them, and do not pad the "
+            "answer out to the length of a function explanation -- there "
+            "is genuinely less to say, and saying it briefly is the "
+            "better answer.\n"
+        )
 
     parts.append("# Measured facts about it\n")
     parts.append(
@@ -278,7 +379,7 @@ async def explain(
         if hit is not None:
             return {
                 "facts": facts,
-                "explanation": json.loads(hit.payload_json),
+                "explanation": normalise(json.loads(hit.payload_json)),
                 "model": hit.model,
                 "cached": True,
                 "reason": None,
@@ -304,6 +405,8 @@ async def explain(
         feature="explain_code",
         project_id=project.id,
     )
+
+    answer = normalise(answer)
 
     row = cached(db, project.id, path, start, end, sha)
     if row is None:

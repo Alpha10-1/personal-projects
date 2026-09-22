@@ -67,16 +67,27 @@ function Section({ title, children }) {
   );
 }
 
+/** Whatever the model sent, as a list.
+ *
+ *  The backend normalises this already. This is the second line of defence,
+ *  and it exists because the first one failing used to take the whole page
+ *  with it: a string where a list was expected is a `.map` on a string,
+ *  which throws during render. A panel that says something slightly oddly
+ *  shaped is always better than a panel that is not there.
+ */
+const asList = (value) => (Array.isArray(value) ? value : value ? [value] : []);
+
 /** A list where each item is one sentence of prose, rendered as Markdown so
  *  the identifiers in it come out in code style rather than as words. */
 function Points({ items, icon: Icon, colour }) {
-  if (!items?.length) return null;
+  const list = asList(items);
+  if (!list.length) return null;
   return (
     <ul className="space-y-1">
-      {items.map((item, index) => (
+      {list.map((item, index) => (
         <li key={index} className="flex items-start gap-1.5 text-xs">
           {Icon ? <Icon size={13} className={`mt-px shrink-0 ${colour}`} /> : null}
-          <Markdown className="text-[var(--text-secondary)]">{item}</Markdown>
+          <Markdown className="text-[var(--text-secondary)]">{String(item)}</Markdown>
         </li>
       ))}
     </ul>
@@ -86,13 +97,15 @@ function Points({ items, icon: Icon, colour }) {
 function Explanation({ explanation }) {
   const {
     summary,
-    walkthrough = [],
     role_in_the_system: role,
     shared_state: shared,
-    if_you_change_it: consequences = [],
-    watch_out: watchOut = [],
-    unknowns = [],
+    if_you_change_it: consequences,
+    watch_out: watchOut,
+    unknowns,
   } = explanation;
+  const walkthrough = asList(explanation.walkthrough).map((step) =>
+    typeof step === "string" ? { what: step } : step,
+  );
 
   return (
     <div className="space-y-3">
@@ -129,19 +142,19 @@ function Explanation({ explanation }) {
         </Section>
       ) : null}
 
-      {consequences.length ? (
+      {asList(consequences).length ? (
         <Section title="If you change it">
           <Points items={consequences} icon={AlertTriangle} colour={COLOUR.warning} />
         </Section>
       ) : null}
 
-      {watchOut.length ? (
+      {asList(watchOut).length ? (
         <Section title="Easy to miss">
           <Points items={watchOut} icon={Eye} colour={COLOUR.neutral} />
         </Section>
       ) : null}
 
-      {unknowns.length ? (
+      {asList(unknowns).length ? (
         <Section title="Could not tell from this">
           <Points items={unknowns} icon={Info} colour={COLOUR.neutral} />
         </Section>
@@ -248,6 +261,10 @@ export default function ExplainPanel({
   if (!result) return null;
 
   const { facts, explanation, cached, model, reason } = result;
+  // Set only when the highlight is not a definition. It is a remark, not a
+  // refusal: the explanation below it is still worth reading, it just has
+  // less to go on than it would for a function.
+  const selection = facts.selection || {};
 
   return (
     <Card className="space-y-3 p-3">
@@ -288,6 +305,15 @@ export default function ExplainPanel({
           ) : null}
         </div>
       </div>
+
+      {selection.hint ? (
+        <p className="flex items-start gap-1.5 rounded border border-[var(--border)] bg-[var(--surface-2)] px-2 py-1.5 text-xs text-[var(--text-secondary)]">
+          <Info size={13} className="mt-px shrink-0 text-[var(--text-muted)]" />
+          <span>
+            You highlighted <strong>{selection.what}</strong>. {selection.hint}
+          </span>
+        </p>
+      ) : null}
 
       {explanation ? (
         <Explanation explanation={explanation} />

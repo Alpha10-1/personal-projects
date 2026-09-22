@@ -694,6 +694,21 @@ give.
 The facts stay on screen under the prose, collapsed, so any claim can be
 checked against what it was based on.
 
+**Not every highlight is a function.** Imports, a comment, a docstring,
+three loose lines — all reasonable things to select, none of them
+answerable with "here is what this does and who calls it". So the selection
+is classified first, deterministically, and when it is not a definition the
+panel says so in a line:
+
+> You highlighted **imports**. Imports say what this file uses, not what it
+> does. Highlight a function or class — or any line inside one — and this
+> can also tell you what depends on it.
+
+The model is told the same thing, and told to keep the answer short rather
+than dress three imports up as a subsystem. The explanation still runs; the
+note frames it rather than replacing it. A comment *inside* a function is
+still answered as that function, because that is the better answer.
+
 **It is asked once.** An answer is cached against a digest of the whole
 file -- the whole file, not the selection, because the explanation talks
 about the imports above it too, and an edit elsewhere can make it wrong

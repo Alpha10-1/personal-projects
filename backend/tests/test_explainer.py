@@ -305,3 +305,123 @@ def test_the_explanation_is_stored_as_json_not_prose(db, project, repo, monkeypa
     [row] = db.query(models.CodeExplanation).all()
     assert json.loads(row.payload_json)["summary"]
     assert row.model
+
+
+# --- when the highlight is not a definition ------------------------------
+#
+# The case that used to crash the panel. Two separate faults met: the
+# selection was not a definition, so there was little to say, and the model
+# answered the list fields with prose. The first is now described; the
+# second is now reshaped.
+
+
+def test_the_prompt_says_when_the_highlight_is_not_a_definition(
+    db, project, repo, monkeypatch, configured
+):
+    captured = {}
+    monkeypatch.setattr(ai, "structured", fake_model(captured))
+    write(repo / "core.py", "import os\nimport sys\n\n\ndef go():\n    return os, sys\n")
+
+    import asyncio
+
+    asyncio.run(explainer.explain(db, project, "core.py", 1, 2))
+
+    assert "What was highlighted" in captured["prompt"]
+    assert "This is imports, not a definition" in captured["prompt"]
+
+
+def test_the_facts_name_what_was_highlighted(db, project, repo):
+    from app import impact
+
+    facts = impact.explain(repo, "core.py", 1, 1)
+    assert facts["selection"]["kind"] == "definition"
+    assert facts["selection"]["hint"] is None
+
+
+def test_a_comment_inside_a_function_still_answers_as_that_function(db, project, repo):
+    """The enclosing definition is the better answer, so it wins."""
+    from app import impact
+
+    facts = impact.explain(repo, "core.py", 5, 5)
+    assert facts["selection"]["kind"] == "inside_definition"
+    assert facts["selection"]["hint"] is None
+
+
+def test_a_comment_outside_everything_is_described_as_prose(db, project, repo):
+    from app import impact
+
+    write(repo / "notes.py", "# Why this exists at all.\n# Nobody remembers.\n")
+    facts = impact.explain(repo, "notes.py", 1, 2)
+    assert facts["selection"]["kind"] == "comment"
+    assert "prose" in facts["selection"]["hint"]
+
+
+def test_a_blank_highlight_says_there_is_nothing_in_it(db, project, repo):
+    from app import impact
+
+    facts = impact.explain(repo, "core.py", 2, 3)
+    assert facts["selection"]["kind"] == "blank"
+    assert "nothing in the highlight" in facts["selection"]["hint"]
+
+
+@pytest.mark.parametrize(
+    "sent,expected",
+    [
+        (["a", "b"], ["a", "b"]),
+        ("one paragraph", ["one paragraph"]),
+        ("- first\n- second", ["first", "second"]),
+        ("1. first\n2. second", ["first", "second"]),
+        ("", []),
+        (None, []),
+    ],
+)
+def test_a_list_field_answered_as_prose_becomes_a_list(sent, expected):
+    assert explainer.normalise({"if_you_change_it": sent})["if_you_change_it"] == expected
+
+
+def test_a_walkthrough_of_sentences_becomes_steps():
+    out = explainer.normalise({"walkthrough": ["does a thing", {"lines": "1", "what": "y"}]})
+    assert out["walkthrough"] == [
+        {"lines": None, "what": "does a thing"},
+        {"lines": "1", "what": "y"},
+    ]
+
+
+def test_a_text_field_answered_as_a_list_becomes_text():
+    assert explainer.normalise({"summary": ["one", "two"]})["summary"] == "one\ntwo"
+
+
+def test_what_is_stored_is_already_the_right_shape(
+    db, project, repo, monkeypatch, configured
+):
+    """The cache must not hold a shape the browser cannot render."""
+    import asyncio
+
+    monkeypatch.setattr(
+        ai,
+        "structured",
+        fake_model(answer={**ANSWER, "if_you_change_it": "just the one thing"}),
+    )
+    result = asyncio.run(explainer.explain(db, project, "core.py", 4, 8))
+    assert result["explanation"]["if_you_change_it"] == ["just the one thing"]
+
+    stored = db.query(models.CodeExplanation).one()
+    assert json.loads(stored.payload_json)["if_you_change_it"] == ["just the one thing"]
+
+
+def test_an_answer_cached_in_the_old_shape_is_reshaped_on_the_way_out(
+    db, project, repo, monkeypatch, configured
+):
+    """Rows written before this existed still render."""
+    import asyncio
+
+    monkeypatch.setattr(ai, "structured", fake_model())
+    asyncio.run(explainer.explain(db, project, "core.py", 4, 8))
+
+    row = db.query(models.CodeExplanation).one()
+    row.payload_json = json.dumps({**ANSWER, "unknowns": "one loose end"})
+    db.commit()
+
+    result = asyncio.run(explainer.explain(db, project, "core.py", 4, 8))
+    assert result["cached"] is True
+    assert result["explanation"]["unknowns"] == ["one loose end"]

@@ -28,6 +28,7 @@ import { useAsync, useIsDark } from "@/lib/hooks";
 import { languageFor, languageName, selectedLines, themeFor } from "@/lib/editor";
 import { Badge, Button, Card, ErrorNote, Spinner } from "@/components/ui";
 import ExplainPanel from "@/components/ExplainPanel";
+import ErrorBoundary from "@/components/ErrorBoundary";
 
 export default function CodeEditor({ project, path, onRaised, onOpenInEditor }) {
   // Mounted with `key={path}` by the caller, so every piece of state here
@@ -182,11 +183,19 @@ export default function CodeEditor({ project, path, onRaised, onOpenInEditor }) 
       </div>
 
       {explain.result || explain.loading || explain.error ? (
-        <ExplainPanel
-          {...explain}
-          onRefresh={() => askExplain(asked, true)}
-          onClose={() => setExplain({ result: null, loading: false, error: null })}
-        />
+        // Boundaried because this is the one panel here rendering something
+        // a model wrote, and a surprise in its shape should cost you the
+        // explanation, not the editor you were in the middle of using.
+        <ErrorBoundary
+          key={`${asked?.from}-${asked?.to}`}
+          label="The explanation"
+        >
+          <ExplainPanel
+            {...explain}
+            onRefresh={() => askExplain(asked, true)}
+            onClose={() => setExplain({ result: null, loading: false, error: null })}
+          />
+        </ErrorBoundary>
       ) : null}
 
       {error ? <ErrorNote error={error} onDismiss={() => setError(null)} /> : null}

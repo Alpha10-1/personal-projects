@@ -608,6 +608,127 @@ def assess(
 # --- explaining a selection ----------------------------------------------
 
 
+# What a highlight turned out to be, when it is not a definition.
+#
+# The point is not classification for its own sake. Three highlighted
+# import lines and half a highlighted function are different questions,
+# and answering both as though they were "explain this function" is what
+# makes the answer read as nonsense. Saying plainly what was highlighted,
+# and what it cannot tell you about it, is the honest version.
+COMMENT_PREFIXES = {
+    "python": ("#",),
+    "javascript": ("//", "/*", "*", "*/"),
+}
+
+# A docstring or a block comment opened on the highlighted lines. Rough on
+# purpose: this decides a sentence of wording, not a behaviour.
+DOCSTRING = re.compile('^[rbfuRBFU]*("""|\'\'\')')
+
+
+def describe_selection(
+    lines: list[str],
+    path: str,
+    enclosing: Optional[Symbol],
+    inside: list[Symbol],
+    before: str = "",
+) -> dict:
+    """What was highlighted, in the words someone would use for it.
+
+    Deterministic, and deliberately gentle about the highlights it cannot
+    do much with. Selecting three imports is a perfectly reasonable thing
+    to do -- it just cannot be answered with "here is what this function
+    does and who calls it", because there is no function and nobody calls
+    a line. Saying so beats both an error and a confident non-answer.
+
+    `hint` is None when the highlight is one this can answer well. That is
+    the field the UI reads, so a good selection says nothing extra.
+    """
+    language = language_of(path)
+    stripped = [line.strip() for line in lines]
+    content = [line for line in stripped if line]
+
+    if not content:
+        return {
+            "kind": "blank",
+            "what": "blank lines",
+            "hint": (
+                "There is nothing in the highlight to explain. Select a "
+                "function, a class, or any line inside one."
+            ),
+        }
+
+    if inside:
+        named = ", ".join(f"{s.kind} {s.name}" for s in inside[:3])
+        more = f" and {len(inside) - 3} more" if len(inside) > 3 else ""
+        return {"kind": "definition", "what": f"the {named}{more}", "hint": None}
+
+    if enclosing:
+        return {
+            "kind": "inside_definition",
+            "what": f"part of the {enclosing.kind} {enclosing.name}",
+            "hint": None,
+        }
+
+    # From here on there is no definition to hang the answer on, so each
+    # case says what it is and what selecting a definition would add.
+    fuller = (
+        "Highlight a function or class -- or any line inside one -- and this "
+        "can also tell you what depends on it."
+    )
+
+    # Prose inside a docstring is the most likely thing to highlight that
+    # is not code at all. Found by counting the triple quotes above it,
+    # which is wrong if one appears inside an ordinary string -- the same
+    # approximation the rest of this module makes, for the same reason.
+    opens_docstring = DOCSTRING.match(content[0]) is not None
+    if opens_docstring or (
+        language == "python"
+        and (before.count('"""') + before.count("'''")) % 2
+    ):
+        return {
+            "kind": "comment",
+            "what": "prose from a docstring",
+            "hint": (
+                "This is documentation, not code, so there is nothing for it "
+                "to trace. " + fuller
+            ),
+        }
+
+    prefixes = COMMENT_PREFIXES.get(language, ("#", "//"))
+    if all(line.startswith(prefixes) or DOCSTRING.match(line) for line in content):
+        return {
+            "kind": "comment",
+            "what": "a comment" if len(content) == 1 else "comments",
+            "hint": (
+                "This is prose, not code, so there is nothing for it to "
+                "trace. " + fuller
+            ),
+        }
+
+    pattern = IMPORT_PATTERNS.get(language) if language else None
+    if pattern and all(pattern.match(line) for line in content):
+        return {
+            "kind": "imports",
+            "what": "an import" if len(content) == 1 else "imports",
+            "hint": (
+                "Imports say what this file uses, not what it does. " + fuller
+            ),
+        }
+
+    return {
+        "kind": "loose_lines",
+        "what": (
+            "a line" if len(content) == 1 else f"{len(content)} lines"
+        )
+        + " that sit outside any function or class",
+        "hint": (
+            "Nothing here is named, so there is nothing to search the "
+            "repository for. " + fuller
+        ),
+    }
+
+
+
 def explain(root: Path, path: str, start_line: int, end_line: int) -> dict:
     """What a selected span of a file is, and what depends on it.
 
@@ -708,6 +829,13 @@ def explain(root: Path, path: str, start_line: int, end_line: int) -> dict:
         "start_line": start,
         "end_line": end,
         "language": language_of(path),
+        "selection": describe_selection(
+            lines[start - 1 : end],
+            path,
+            enclosing,
+            inside,
+            "\n".join(lines[: start - 1]),
+        ),
         "enclosing": asdict(enclosing) if enclosing else None,
         "defines": [asdict(s) for s in inside],
         "shared_values": [asdict(s) for s in shared],

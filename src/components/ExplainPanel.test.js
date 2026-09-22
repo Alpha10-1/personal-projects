@@ -167,3 +167,70 @@ describe("the shell", () => {
     expect(onClose).toHaveBeenCalled();
   });
 });
+
+describe("when the highlight is not a definition", () => {
+  const hinted = {
+    kind: "imports",
+    what: "imports",
+    hint: "Imports say what this file uses, not what it does.",
+  };
+
+  it("says what was highlighted, gently, above the answer", () => {
+    render(
+      <ExplainPanel result={result({ facts: { ...FACTS, selection: hinted } })} />,
+    );
+    expect(screen.getByText(/You highlighted/)).toBeInTheDocument();
+    expect(screen.getByText("imports")).toBeInTheDocument();
+    expect(screen.getByText(/not what it does/)).toBeInTheDocument();
+  });
+
+  it("still shows the explanation rather than replacing it", () => {
+    render(
+      <ExplainPanel result={result({ facts: { ...FACTS, selection: hinted } })} />,
+    );
+    expect(screen.getByText(/Returns at most/)).toBeInTheDocument();
+  });
+
+  it("says nothing extra when the highlight was a definition", () => {
+    const selection = { kind: "definition", what: "the function fetch_rows", hint: null };
+    render(
+      <ExplainPanel result={result({ facts: { ...FACTS, selection } })} />,
+    );
+    expect(screen.queryByText(/You highlighted/)).not.toBeInTheDocument();
+  });
+});
+
+describe("a model answer of the wrong shape", () => {
+  // The crash this whole change exists for: a string where a list was
+  // expected. The backend reshapes it now; this is the second net.
+  it("renders a list field answered as one string", () => {
+    render(
+      <ExplainPanel
+        result={result({
+          explanation: { ...EXPLANATION, if_you_change_it: "Only one thing breaks." },
+        })}
+      />,
+    );
+    expect(screen.getByText(/Only one thing breaks/)).toBeInTheDocument();
+  });
+
+  it("renders a walkthrough of bare sentences", () => {
+    render(
+      <ExplainPanel
+        result={result({
+          explanation: { ...EXPLANATION, walkthrough: "It checks, then slices." },
+        })}
+      />,
+    );
+    expect(screen.getByText(/It checks, then slices/)).toBeInTheDocument();
+  });
+
+  it("omits a section the model left empty", () => {
+    render(
+      <ExplainPanel
+        result={result({ explanation: { ...EXPLANATION, watch_out: "" } })}
+      />,
+    );
+    expect(screen.queryByText("Easy to miss")).not.toBeInTheDocument();
+  });
+});
