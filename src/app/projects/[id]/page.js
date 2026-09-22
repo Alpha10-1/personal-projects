@@ -47,6 +47,7 @@ import CodeWorkspace from "@/components/CodeWorkspace";
 import AgentRuns from "@/components/AgentRuns";
 import CodeChanges from "@/components/CodeChanges";
 import ProjectInventory from "@/components/ProjectInventory";
+import RoadmapGaps from "@/components/RoadmapGaps";
 import ProjectTeam from "@/components/ProjectTeam";
 import TimeLogPanel from "@/components/TimeLogPanel";
 
@@ -379,6 +380,7 @@ export default function ProjectDetailPage() {
       ) : null}
 
       {tab === "milestones" ? (
+        <div className="space-y-5">
         <Card>
           <CardHeader
             title="Milestones"
@@ -473,6 +475,16 @@ export default function ProjectDetailPage() {
             />
           )}
         </Card>
+
+        <RoadmapGaps
+          project={p}
+          onProposed={() => {
+            // Whatever survived was raised as a suggestion, so the review
+            // page and the counts on this one are now out of date.
+            project.reload({ quiet: true });
+          }}
+        />
+        </div>
       ) : null}
 
       {tab === "time" ? (

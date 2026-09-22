@@ -15,7 +15,7 @@ than being dropped in silence.
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app import ai, inventory, models, survey, workspace
+from app import ai, inventory, models, roadmap, survey, workspace
 from app.db import get_db
 
 router = APIRouter(tags=["inventory"])
@@ -47,5 +47,21 @@ async def run_survey(project_id: int, db: Session = Depends(get_db)):
         return await survey.run(db, project)
     except workspace.WorkspaceError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (ai.AINotConfigured, ai.AIFailed) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@router.post("/projects/{project_id}/roadmap")
+async def run_roadmap(project_id: int, db: Session = Depends(get_db)):
+    """Read the board and the code, then propose what is on neither.
+
+    No `GET` beside it, unlike the inventory: the board is already
+    readable through `/projects/{id}/milestones` and `/tasks`, and a
+    second way to read the same rows would be a second thing to keep
+    correct.
+    """
+    project = project_or_404(db, project_id)
+    try:
+        return await roadmap.run(db, project)
     except (ai.AINotConfigured, ai.AIFailed) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc

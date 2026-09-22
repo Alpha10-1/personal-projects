@@ -363,3 +363,64 @@ def test_an_exact_inventory_match_is_still_trusted_at_four_characters(repo):
     assert inventory.already_there(repo, "prep", built) == (
         "`prep` is already defined in this repository"
     )
+
+
+# --- a filename is looked up, not searched for ---------------------------
+#
+# On a real run, two proposals were discarded because `docker-compose.yml`
+# "already appears in backend/app/inventory.py" -- true, but only because
+# that module keeps a list of config filenames. The repository had no such
+# file. Grepping for a name answers a different question from asking
+# whether the file is there.
+
+
+def test_a_filename_that_is_not_in_the_repository_is_not_evidence(repo):
+    write(repo / "app" / "conf.py", "CONFIG_NAMES = {'docker-compose.yml', 'Makefile'}\n")
+    run_git(repo, "add", "-A")
+    run_git(repo, "-c", "user.email=t@e.com", "-c", "user.name=T", "commit", "-m", "names")
+    built = inventory.index(repo)
+    assert inventory.already_there(repo, "docker-compose.yml", built) is None
+
+
+def test_a_filename_that_is_in_the_repository_is(repo):
+    built = inventory.index(repo)
+    assert "package.json" in inventory.already_there(repo, "package.json", built)
+
+
+def test_a_nested_filename_matches_on_its_own_name(repo):
+    built = inventory.index(repo)
+    assert "WidgetList.js" in inventory.already_there(repo, "WidgetList.js", built)
+
+
+def test_a_full_path_matches(repo):
+    built = inventory.index(repo)
+    assert inventory.already_there(repo, "app/main.py", built) is not None
+
+
+def test_a_filename_never_falls_through_to_the_grep(repo):
+    """The point of the lookup: a miss is a real miss, not an invitation to
+    go looking for the name in prose."""
+    write(repo / "notes.md", "One day we will add a Dockerfile.prod here.\n")
+    run_git(repo, "add", "-A")
+    run_git(repo, "-c", "user.email=t@e.com", "-c", "user.name=T", "commit", "-m", "notes")
+    built = inventory.index(repo)
+    assert inventory.already_there(repo, "Dockerfile.prod", built) is None
+
+
+def test_the_index_carries_every_tracked_path(repo):
+    built = inventory.index(repo)
+    assert "README.md" in built["all_paths"]
+    assert "tests/test_main.py" in built["all_paths"]
+    assert not any("build/" in p for p in built["all_paths"])
+
+
+@pytest.mark.parametrize("name", [".env.example", "settings.template", "a.yml"])
+def test_a_long_extension_is_still_a_filename(repo, name):
+    """A six-character cap sent `.env.example` to the grep, which found it
+    in `.gitignore` and called that evidence."""
+    assert inventory.LOOKS_LIKE_FILE.match(name)
+
+
+def test_a_sentence_is_not_mistaken_for_a_filename():
+    assert not inventory.LOOKS_LIKE_FILE.match("add a config file")
+    assert not inventory.LOOKS_LIKE_FILE.match("rate_limit")

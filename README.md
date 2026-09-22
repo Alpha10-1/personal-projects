@@ -543,6 +543,56 @@ rules came out of running it against this repository:
 - **Substrings are not matches.** `export` inside `exported` concluded that
   a CSV export already existed. The search asks git for whole words.
 
+### What is not planned yet
+
+The same contract, pointed at the board instead of the code. It sits under
+the **Milestones** tab.
+
+`board.py` reads what the project already has -- every milestone, every
+task in every state, what has been written down, the hours logged. The
+model is given that *and* the repository inventory, and asked what is
+missing. Surviving proposals become suggestions: accepting a milestone
+adds it at the end of the list, accepting a task adds it to the board with
+the reasoning as its notes.
+
+**Two checks run, because work can already exist in two places.** It may be
+written on the board, or it may simply be built and never written down.
+Both count as done.
+
+- **The board check** compares titles. It is vocabulary overlap with light
+  stemming, so "Rate limit the API" is caught by "Add rate limiting" and
+  "Release the beta" by "Beta released". It is tuned to over-match.
+- **The code check** is the same `look_for` search the repository survey
+  uses: the model names identifiers that would exist if the work were
+  done, and they are searched for.
+
+Finished work counts. A task marked done last month is not a gap, and
+proposing it again is the failure the whole arrangement exists to prevent.
+
+Everything discarded comes back with its reason, and the two checks are
+reported separately on each proposal -- a suggestion that passed the board
+check but could not be checked against the code says so, rather than
+looking as though both had passed.
+
+#### What the title check cannot do
+
+It matches paraphrases and inflections. It does **not** match synonyms:
+"Back up the database" and "Database dump script" are the same work and it
+will not say so. That is precisely why the code check exists beside it,
+and why neither is trusted alone.
+
+#### Two things running it for real taught it
+
+A filename is now **looked up, not searched for**. Two proposals were
+discarded because `docker-compose.yml` "already appears in
+`backend/app/inventory.py`" -- true, but only because that module keeps a
+list of config filenames, and the repository had no such file. Asking
+whether a file exists and grepping for its name are different questions.
+
+And a filename's extension can be twelve characters, not six. At six,
+`.env.example` was not recognised as a filename, fell through to the grep,
+and was "found" in `.gitignore`.
+
 ### What it costs
 
 One survey of this repository -- 146 source files, 40,000 lines -- is a
@@ -1059,7 +1109,9 @@ backend/
     impact.py      what a change reaches, and what a selection is
     explainer.py   the model's reading of a selection, grounded and cached
     inventory.py   what the repository contains, and proving a gap is a gap
+    board.py       what the project already has planned, and recognising it
     survey.py      the feature outline into notes, the gaps into suggestions
+    roadmap.py     the milestones and tasks a project has not planned yet
     routes/code.py editing, approval, the outline and the undo
     ai.py          the model client -- the only thing that leaves the machine
     assistant.py   what the model is told, and what it is asked for

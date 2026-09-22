@@ -280,22 +280,6 @@ def test_a_dismissed_gap_is_not_raised_again(db, project, repo, monkeypatch, con
     assert db.query(models.Suggestion).count() == 1
 
 
-# --- titles that mean the same thing -------------------------------------
-
-
-@pytest.mark.parametrize(
-    "a,b,same",
-    [
-        ("Add rate limiting to the API", "Rate limit the API", True),
-        ("Paginate the activity feed", "Add pagination to the activity feed", True),
-        ("Add rate limiting", "Add caching", False),
-        ("Write the deployment guide", "Rate limit the API", False),
-    ],
-)
-def test_two_titles_for_the_same_work_are_recognised(a, b, same):
-    assert survey.overlaps(a, b) is same
-
-
 # --- accepting one --------------------------------------------------------
 
 

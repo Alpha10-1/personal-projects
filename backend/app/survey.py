@@ -28,7 +28,7 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import ai, formatting, inventory, models, review, workspace
+from app import ai, board, formatting, inventory, models, review, workspace
 
 # The outline is prose with a dozen features and a dozen gaps in it.
 MAX_SURVEY_TOKENS = 8_000
@@ -37,16 +37,6 @@ MAX_SURVEY_TOKENS = 8_000
 # updates it rather than leaving the project with five of them.
 NOTE_TITLE = "What this project does"
 
-# Two titles sharing this much of their vocabulary are the same piece of
-# work. Loose enough to catch "Add rate limiting" against "Rate-limit the
-# API", tight enough not to collapse everything about the API into one.
-TITLE_OVERLAP = 0.6
-
-# Words that carry no signal when comparing two task titles.
-STOPWORDS = {
-    "a", "an", "the", "to", "for", "of", "in", "on", "and", "or", "with",
-    "add", "make", "use", "support", "it", "its", "this", "that", "is", "be",
-}
 
 
 SURVEY_SCHEMA = {
@@ -245,37 +235,15 @@ def normalise(result: dict) -> dict:
     }
 
 
-def significant(title: str) -> set[str]:
-    words = {
-        word.strip(".,:;()`\"'").lower()
-        for word in (title or "").replace("-", " ").replace("/", " ").split()
-    }
-    return {w for w in words if len(w) > 2 and w not in STOPWORDS}
-
-
-def overlaps(title: str, existing: str) -> bool:
-    """Whether two pieces of work are the same thing said differently."""
-    a, b = significant(title), significant(existing)
-    if not a or not b:
-        return False
-    return len(a & b) / min(len(a), len(b)) >= TITLE_OVERLAP
-
-
 def already_tracked(db: Session, project_id: int, title: str) -> Optional[str]:
     """Whether this is already on the board, in any state.
 
-    Includes finished tasks deliberately. "You should build X" about
-    something finished last month is the same failure as suggesting what
-    is already in the code, and the board is where that shows.
+    Delegates to `board.covered`, which is the same comparison the roadmap
+    uses -- one notion of "we already have that" rather than two that
+    drift apart.
     """
-    tasks = db.execute(
-        select(models.Task).where(models.Task.project_id == project_id)
-    ).scalars()
-    for task in tasks:
-        if overlaps(title, task.title):
-            state = "already done" if task.status == "done" else f"already {task.status}"
-            return f"task #{task.id} covers this and is {state}"
-    return None
+    project = db.get(models.Project, project_id)
+    return board.covered(board.snapshot(db, project), title)
 
 
 def context(db: Session, project, inv: dict) -> str:

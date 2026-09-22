@@ -179,6 +179,7 @@ def scan(root: Path) -> dict:
             )
 
     return {
+        "files": considered,
         "counts": {
             "tracked_files": len(paths),
             "scanned": len(considered),
@@ -241,6 +242,12 @@ MIN_TERM = 4
 # in a glob pattern, and inside the SDK's own error strings.
 MIN_SEARCH_TERM = 6
 
+# Something with an extension and no spaces is a filename, and is checked
+# against the file list rather than searched for. Twelve characters of
+# extension, not six: `.env.example` and `.template` are exactly the kind
+# of file a proposal names, and the shorter cap sent them to the grep.
+LOOKS_LIKE_FILE = re.compile(r"^[\w./\-]+\.[A-Za-z0-9]{1,12}$")
+
 
 def index(root: Path) -> dict:
     """Everything the repository defines, by name, plus its paths.
@@ -265,6 +272,9 @@ def index(root: Path) -> dict:
         "word_index": word_index,
         "paths": {m["path"].lower() for m in inventory["modules"]}
         | {p.lower() for p in inventory["pages"] + inventory["components"]},
+        # Every tracked path, so "does this file exist" is answered by
+        # looking rather than by grepping for its name.
+        "all_paths": [p.replace("\\", "/") for p in inventory["files"]],
         "routes": {r["path"].lower() for r in inventory["routes"]},
         "tables": {t.lower() for t in inventory["tables"]},
         "env_vars": {e.lower() for e in inventory["env_vars"]},
@@ -281,6 +291,18 @@ def already_there(root: Path, term: str, built: dict) -> Optional[str]:
     """
     needle = (term or "").strip().lower()
     if len(needle) < MIN_TERM:
+        return None
+
+    if LOOKS_LIKE_FILE.match(needle):
+        # A file is in the repository or it is not, and grepping for its
+        # name answers a different question. This codebase keeps a list of
+        # config filenames in `inventory.py`, which made
+        # `docker-compose.yml` look present in a repository that has none
+        # -- and discarded two real proposals on the strength of it.
+        for path in built.get("all_paths") or []:
+            lowered = path.lower()
+            if lowered == needle or lowered.endswith("/" + needle):
+                return f"`{path}` already exists"
         return None
 
     if needle in built["names"]:

@@ -380,6 +380,31 @@ def apply(db: Session, suggestion: models.Suggestion) -> None:
         project.summary = suggestion.proposed_value
         return
 
+    if suggestion.target_type == "project" and suggestion.field == "milestone":
+        project = db.get(models.Project, suggestion.target_id)
+        if project is None:
+            raise LookupError(f"Project {suggestion.target_id} no longer exists")
+        # Appended rather than slotted in: the model proposed an order, but
+        # where a checkpoint really belongs is a judgement, and reordering
+        # someone's roadmap on their behalf is not what accepting a
+        # suggestion should mean.
+        last = db.execute(
+            select(models.Milestone.position)
+            .where(models.Milestone.project_id == project.id)
+            .order_by(models.Milestone.position.desc())
+            .limit(1)
+        ).scalar()
+        db.add(
+            models.Milestone(
+                project_id=project.id,
+                title=suggestion.proposed_value,
+                detail=suggestion.rationale,
+                status="pending",
+                position=(last or 0) + 1,
+            )
+        )
+        return
+
     if suggestion.target_type == "project" and suggestion.field == "task":
         project = db.get(models.Project, suggestion.target_id)
         if project is None:

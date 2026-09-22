@@ -193,6 +193,18 @@ RULE_EXPLANATIONS = {
         "A merged pull request names this task, which usually means the work "
         "it describes has landed."
     ),
+    "roadmap_milestone": (
+        "The whole board was read -- every milestone and every task, in "
+        "every state -- along with the code where there is a checkout. "
+        "This is a checkpoint the project does not have. Anything already "
+        "on the board or already built was discarded rather than raised."
+    ),
+    "roadmap_task": (
+        "The whole board was read -- every milestone and every task, in "
+        "every state -- along with the code where there is a checkout. "
+        "This is work the project has neither written down nor built. "
+        "Anything already there was discarded rather than raised."
+    ),
     "inventory_gap": (
         "The whole repository was read -- every module, route, table and "
         "page -- and this is something it does not do yet. Before being "
@@ -209,6 +221,10 @@ RULE_EXPLANATIONS = {
 # write and where, rather than leaving it to be inferred from a field name.
 APPLIES = {
     ("project", "summary"): "Replaces this project's summary with the proposed text.",
+    ("project", "milestone"): (
+        "Adds this to the project's milestones, at the end, with the "
+        "reasoning as its detail. It has no date until you give it one."
+    ),
     ("project", "task"): (
         "Adds this to the project's board as a todo, with the reasoning as "
         "its notes. Nothing else changes, and no code is written."
