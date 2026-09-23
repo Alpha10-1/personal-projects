@@ -189,7 +189,7 @@ def test_not_knowing_is_not_the_same_as_untested(db, repo):
     entry = next(e for e in churn.map_project(db, project)["files"] if e["path"] == "notes.md")
     assert entry["tested"] is None
     assert entry["at_risk"] is False
-    assert "language" in entry["why_unknown"]
+    assert entry["why_unknown"]
 
 
 def test_a_file_that_is_gone_is_not_at_risk(db, repo):
@@ -257,3 +257,47 @@ def test_the_limits_are_stated_rather_than_implied(db, repo):
     assert "rename" in limits
     assert "not fetched" in limits or "never fetched" in limits
     assert "coverage run" in limits
+
+
+# --- "cannot read it" versus "there is nothing in it to read" -------------
+
+
+@pytest.mark.parametrize(
+    "path", ["README.md", ".github/workflows/ci.yml", "Dockerfile", "src/app.css"]
+)
+def test_a_file_with_no_code_says_so_rather_than_blaming_the_outline(
+    db, repo, path
+):
+    """Two different answers that used to share one sentence.
+
+    "The outline does not read this language yet" implies a gap that
+    closing would help. For a README it would not: there is nothing in it
+    to trace, and the wording should not send anyone off to add a parser.
+    """
+    from pathlib import Path
+
+    project, commit = repo
+    target = Path(project.local_path) / path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("# hello\n")
+    for _ in range(churn.BUSY):
+        commit(path)
+
+    entry = next(e for e in churn.map_project(db, project)["files"] if e["path"] == path)
+    assert entry["tested"] is None
+    assert entry["why_unknown"] == "not code — there are no definitions to trace"
+
+
+def test_an_unsupported_language_still_says_the_outline_cannot_read_it(db, repo):
+    """The other half: a gap that adding a parser really would close."""
+    from pathlib import Path
+
+    project, commit = repo
+    (Path(project.local_path) / "main.go").write_text("package main\n")
+    for _ in range(churn.BUSY):
+        commit("main.go")
+
+    entry = next(
+        e for e in churn.map_project(db, project)["files"] if e["path"] == "main.go"
+    )
+    assert entry["why_unknown"] == "the outline does not read this language yet"

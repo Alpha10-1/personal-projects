@@ -144,6 +144,29 @@ def counted(db: Session, project_id: int, window_days: int = WINDOW_DAYS) -> lis
     )
 
 
+# Files that are genuinely part of a project and genuinely have nothing to
+# trace: documentation, configuration, data, styles. They belong in the
+# churn list -- a README rewritten sixteen times is real work -- but "is it
+# tested" is not a question about them.
+PROSE_SUFFIXES = (
+    ".md", ".mdx", ".rst", ".txt", ".adoc",
+    ".json", ".yml", ".yaml", ".toml", ".ini", ".cfg", ".conf", ".env",
+    ".csv", ".tsv", ".xml", ".sql",
+    ".css", ".scss", ".sass", ".less",
+    ".html", ".htm", ".svg",
+    ".lock", ".mako", ".j2", ".jinja",
+)
+
+
+def matches_prose(path: str) -> bool:
+    lowered = path.replace("\\", "/").lower()
+    name = lowered.rsplit("/", 1)[-1]
+    if "." not in name:
+        # `Dockerfile`, `Makefile`, `LICENSE`: no extension, no functions.
+        return True
+    return lowered.endswith(PROSE_SUFFIXES)
+
+
 def matches_ignored(path: str) -> bool:
     from app import agent
 
@@ -170,7 +193,15 @@ def cover(root: Path, entry: File) -> None:
         return
 
     if impact.language_of(entry.path) is None:
-        entry.why_unknown = "the outline does not read this language yet"
+        # Two different answers wearing one sentence. A `.go` file is a
+        # language the outline has not learned; a `.md` file has no
+        # functions to find in the first place, and saying "not read yet"
+        # about it implies a gap that closing would not help.
+        entry.why_unknown = (
+            "not code — there are no definitions to trace"
+            if matches_prose(entry.path)
+            else "the outline does not read this language yet"
+        )
         return
 
     names = [s.name for s in impact.symbols(payload["content"], entry.path)]
