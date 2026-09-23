@@ -132,10 +132,16 @@ async def test_the_run_raises_suggestions_from_real_evidence(runner, db, make):
 
     summary = await runner.run()
 
-    assert summary["suggestions_raised"] == 1
-    assert summary["suggestions_pending"] == 1
+    # Two, from the one commit: the task is still marked `todo`, and that
+    # day has hours nobody wrote down. Both read off recorded activity,
+    # which is what this test is about.
+    assert summary["suggestions_raised"] == 2
+    assert summary["suggestions_pending"] == 2
+    rules = {s.rule for s in db.query(models.Suggestion).all()}
+    assert rules == {"activity_suggests_started", "time_from_commits"}
     # Raised, not applied.
     assert db.get(models.Task, task.id).status == "todo"
+    assert db.query(models.TimeLog).count() == 0
 
 
 @pytest.mark.anyio

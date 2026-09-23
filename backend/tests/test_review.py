@@ -198,12 +198,23 @@ def test_findings_put_warnings_before_notes(db, make):
 # --- Suggestions -------------------------------------------------------------
 
 
+def only(created, rule="activity_suggests_started"):
+    """Just the rule under test.
+
+    A commit against a task now also lets the time rule propose hours for
+    that day, which is correct and has nothing to do with these tests.
+    They were never about how many rules exist.
+    """
+    return [s for s in created if s.rule == rule]
+
+
+
 def test_commits_against_an_unstarted_task_suggest_starting_it(db, make):
     project = make.project(name="Tracker", repo=REPO)
     task = make.task(title="Tidy the loader", project_id=project.id, status="todo")
     add_event(db, task=task, project=project, title="Task: 1 tidy")
 
-    created = review.propose(db)
+    created = only(review.propose(db))
 
     assert len(created) == 1
     suggestion = created[0]
@@ -250,24 +261,24 @@ def test_proposing_twice_raises_each_suggestion_once(db, make):
     task = make.task(title="Tidy", project_id=project.id, status="todo")
     add_event(db, task=task, project=project)
 
-    first = review.propose(db)
+    first = only(review.propose(db))
     second = review.propose(db)
 
     assert len(first) == 1
-    assert second == []
-    assert db.query(models.Suggestion).count() == 1
+    assert only(second) == []
+    assert db.query(models.Suggestion).filter_by(rule="activity_suggests_started").count() == 1
 
 
 def test_a_dismissed_suggestion_is_never_raised_again(db, make, client):
     project = make.project(name="Tracker", repo=REPO)
     task = make.task(title="Tidy", project_id=project.id, status="todo")
     add_event(db, task=task, project=project)
-    suggestion = review.propose(db)[0]
+    suggestion = only(review.propose(db))[0]
 
     client.post(f"/suggestions/{suggestion.id}/dismiss")
 
-    assert review.propose(db) == []
-    assert db.query(models.Suggestion).count() == 1
+    assert only(review.propose(db)) == []
+    assert db.query(models.Suggestion).filter_by(rule="activity_suggests_started").count() == 1
 
 
 # --- Accepting ---------------------------------------------------------------
@@ -381,8 +392,9 @@ def test_review_with_refresh_raises_suggestions(client, db, make):
 
     body = client.get("/review", params={"refresh": True}).json()
 
-    assert len(body["suggestions"]) == 1
-    assert body["counts"]["suggestions_pending"] == 1
+    raised = [s for s in body["suggestions"] if s["rule"] == "activity_suggests_started"]
+    assert len(raised) == 1
+    assert body["counts"]["suggestions_pending"] >= 1
 
 
 def test_review_counts_findings_by_rule(client, make):
@@ -408,11 +420,13 @@ def test_suggestions_listing_can_show_resolved_ones(client, db, make):
     project = make.project(name="Tracker", repo=REPO)
     task = make.task(title="Tidy", project_id=project.id, status="todo")
     add_event(db, task=task, project=project)
-    suggestion = review.propose(db)[0]
+    suggestion = only(review.propose(db))[0]
     client.post(f"/suggestions/{suggestion.id}/dismiss")
 
-    assert client.get("/suggestions").json() == []
-    assert len(client.get("/suggestions", params={"status": "all"}).json()) == 1
+    listed = client.get("/suggestions").json()
+    assert [s for s in listed if s["rule"] == "activity_suggests_started"] == []
+    every = client.get("/suggestions", params={"status": "all"}).json()
+    assert len([s for s in every if s["rule"] == "activity_suggests_started"]) == 1
 
 
 def test_a_suggestion_carries_the_task_title_and_evidence(client, db, make):
@@ -421,7 +435,11 @@ def test_a_suggestion_carries_the_task_title_and_evidence(client, db, make):
     add_event(db, task=task, project=project, title="Task: 1 tidy")
     review.propose(db)
 
-    row = client.get("/suggestions").json()[0]
+    row = next(
+        s
+        for s in client.get("/suggestions").json()
+        if s["rule"] == "activity_suggests_started"
+    )
 
     assert row["target_title"] == "Tidy the loader"
     assert row["evidence"] and "Task: 1 tidy" in row["evidence"][0]

@@ -504,8 +504,20 @@ def _propose_time(db: Session, existing: set[str]) -> list[models.Suggestion]:
     logged = sessions.already_logged(db)
     cutoff = date.today() - timedelta(days=TIME_LOOKBACK_DAYS)
     created: list[models.Suggestion] = []
+    # Personal projects are out of scope for the analyst, the same way they
+    # are for every other rule here. Arguable for this one -- inferred hours
+    # are an offer rather than a nag -- but a rule that quietly reaches
+    # further than its neighbours is worse than one that is consistent, and
+    # the boundary is one line to move if it turns out to be wrong.
+    personal = set(
+        db.execute(
+            select(models.Project.id).where(models.Project.workspace == "personal")
+        ).scalars()
+    )
 
     for sitting in sessions.days(db, since=cutoff):
+        if sitting.project_id in personal:
+            continue
         if (sitting.project_id, sitting.work_date) in logged:
             continue
         proposed = sessions.format_proposal(sitting)
