@@ -319,6 +319,9 @@ function LinksPanel({ projectId, projects, showProject }) {
                 type="button"
                 aria-label="Delete link"
                 onClick={async () => {
+                  // Notes and files both ask; this one did not, so a
+                  // mis-click deleted a link with no way back.
+                  if (!window.confirm(`Delete "${link.title || link.url}"?`)) return;
                   try {
                     await api.del(`/links/${link.id}`);
                     links.reload({ quiet: true });

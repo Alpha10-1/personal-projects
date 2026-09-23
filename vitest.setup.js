@@ -35,3 +35,15 @@ if (!window.matchMedia) {
     dispatchEvent: () => false,
   });
 }
+
+/**
+ * jsdom implements no layout, so `scrollIntoView` does not exist. Anything
+ * that keeps a view pinned to the newest message calls it -- the assistant
+ * and the brainstorm panel -- and without it the component throws mid-
+ * render, which reads like a failure in whatever was being asserted.
+ *
+ * A plain function, for the same reason as `matchMedia` above.
+ */
+if (!Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = function scrollIntoView() {};
+}
