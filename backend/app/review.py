@@ -257,8 +257,126 @@ def find(db: Session, stale_days: int = STALE_DAYS) -> list[Finding]:
             )
         )
 
+    findings.extend(_hygiene(db))
+
     order = {"warn": 0, "info": 1}
     findings.sort(key=lambda f: (order.get(f.severity, 9), f.rule, f.target_id or 0))
+    return findings
+
+
+def _hygiene(db: Session) -> list[Finding]:
+    """What has been committed to each repository that should not have been.
+
+    Read out of the commit detail already stored, so this costs a query and
+    nothing else. It reports and never offers to fix: rewriting history has
+    to be coordinated with every clone, and a tracker is the wrong thing to
+    be doing it for you.
+
+    The wording insists on the part that is easy to get wrong -- deleting
+    the file now does not remove it from history, and a key that was pushed
+    is a key that must be rotated.
+    """
+    from pathlib import Path
+
+    from app import hygiene
+
+    findings: list[Finding] = []
+    for report in hygiene.scan(db):
+        project = db.get(models.Project, report.project_id) if report.project_id else None
+        if project and project.local_path:
+            try:
+                hygiene.check_present(Path(project.local_path), report)
+            except (OSError, ValueError):
+                pass
+        where = project.name if project else "unfiled commits"
+
+        if report.secrets:
+            named = ", ".join(entry.path for entry in report.secrets[:hygiene.MAX_NAMED])
+            findings.append(
+                Finding(
+                    rule="committed_secret",
+                    severity="warn",
+                    target_type="project",
+                    target_id=report.project_id,
+                    title=f"{where} has credentials committed to its history",
+                    detail=(
+                        "Deleting them now does not remove them from history, "
+                        "and anything that was pushed should be treated as "
+                        "exposed and rotated."
+                    ),
+                    evidence=[
+                        f"{entry.path} — first in {entry.first_sha}"
+                        + (", still in the working copy" if entry.still_present else "")
+                        for entry in report.secrets[: hygiene.MAX_NAMED]
+                    ]
+                    or [named],
+                )
+            )
+
+        for entry in report.filled_templates:
+            findings.append(
+                Finding(
+                    rule="template_has_real_values",
+                    severity="warn",
+                    target_type="project",
+                    target_id=report.project_id,
+                    title=f"{entry.path} looks like it has real values in it",
+                    detail=(
+                        "A template file is meant to be committed, which is "
+                        "exactly why a real value left in one gets published "
+                        "without anyone looking twice."
+                    ),
+                    evidence=entry.filled_keys[: hygiene.MAX_NAMED],
+                )
+            )
+
+        habitual = [e for e in report.noise if e.commits >= hygiene.HABIT]
+        if habitual:
+            worst = habitual[0]
+            findings.append(
+                Finding(
+                    rule="committed_build_output",
+                    severity="info",
+                    target_type="project",
+                    target_id=report.project_id,
+                    title=(
+                        f"{where} commits build output — "
+                        f"{len(report.noise)} such path(s)"
+                    ),
+                    detail=(
+                        f"{worst.path} has been committed in {worst.commits} "
+                        "commits. That is a missing .gitignore entry rather "
+                        "than anything wrong with the code."
+                    ),
+                    evidence=[
+                        f"{entry.path} — {entry.commits} commits"
+                        for entry in habitual[: hygiene.MAX_NAMED]
+                    ],
+                )
+            )
+
+        # Coverage, not a finding about the repository: a scan over commits
+        # whose file lists were never fetched has not looked at them, and
+        # saying nothing would read as saying they are clean.
+        if report.commits_without_detail and report.project_id:
+            findings.append(
+                Finding(
+                    rule="hygiene_not_fully_scanned",
+                    severity="info",
+                    target_type="project",
+                    target_id=report.project_id,
+                    title=(
+                        f"{report.commits_without_detail} of "
+                        f"{report.commits_scanned} commits in {where} were not "
+                        "checked for committed secrets"
+                    ),
+                    detail=(
+                        "Their file lists have not been fetched. Run a deep "
+                        "sync from the Repo tab to include them."
+                    ),
+                )
+            )
+
     return findings
 
 
@@ -358,7 +476,65 @@ def propose(db: Session) -> list[models.Suggestion]:
                     [f"{e.title} ({e.url})" for e in events],
                 )
 
+    created.extend(_propose_time(db, existing))
+
     db.commit()
+    return created
+
+
+# How far back to offer to fill in. A fortnight is long enough to catch the
+# week you meant to write up and never did, and short enough that turning
+# this on does not produce sixty rows to read.
+TIME_LOOKBACK_DAYS = 14
+
+
+def _propose_time(db: Session, existing: set[str]) -> list[models.Suggestion]:
+    """Offer an hours figure for each day that has commits and no time log.
+
+    Proposed, never written, and described as an estimate in the rationale,
+    because it is one: it is read off commit timestamps and cannot see the
+    reading, the thinking, or the afternoon that produced nothing.
+
+    Days that already have hours logged are skipped entirely. A figure you
+    entered by hand is the better number, and offering to add to it would
+    quietly double-count the week.
+    """
+    from app import sessions
+
+    logged = sessions.already_logged(db)
+    cutoff = date.today() - timedelta(days=TIME_LOOKBACK_DAYS)
+    created: list[models.Suggestion] = []
+
+    for sitting in sessions.days(db, since=cutoff):
+        if (sitting.project_id, sitting.work_date) in logged:
+            continue
+        proposed = sessions.format_proposal(sitting)
+        mark = _fingerprint(
+            "time_from_commits", "project", sitting.project_id, proposed
+        )
+        if mark in existing:
+            continue
+        existing.add(mark)
+        suggestion = models.Suggestion(
+            rule="time_from_commits",
+            fingerprint=mark,
+            target_type="project",
+            target_id=sitting.project_id,
+            field="time_log",
+            current_value=None,
+            proposed_value=proposed,
+            rationale=(
+                f"You committed {sitting.commits} time(s) between "
+                f"{sitting.span} and logged no hours that day. This is an "
+                "estimate read off the commit times — it cannot see reading, "
+                "thinking, or work that produced no commit, so treat it as a "
+                "starting figure rather than a measurement."
+            ),
+            evidence=json.dumps(sitting.as_evidence()),
+        )
+        db.add(suggestion)
+        created.append(suggestion)
+
     return created
 
 
@@ -419,6 +595,28 @@ def apply(db: Session, suggestion: models.Suggestion) -> None:
                 title=suggestion.proposed_value,
                 notes=suggestion.rationale,
                 status="todo",
+                source="agent",
+            )
+        )
+        return
+
+    if suggestion.target_type == "project" and suggestion.field == "time_log":
+        from app import sessions
+
+        project = db.get(models.Project, suggestion.target_id)
+        if project is None:
+            raise LookupError(f"Project {suggestion.target_id} no longer exists")
+        hours, work_date = sessions.parse_proposal(suggestion.proposed_value)
+        # Marked `agent` so the ledger never blurs an hour you measured with
+        # one that was inferred from a commit time. Everything downstream --
+        # insights, estimate calibration -- can then say which it is reading.
+        db.add(
+            models.TimeLog(
+                project_id=project.id,
+                work_date=work_date,
+                hours=hours,
+                category="build",
+                note=suggestion.rationale,
                 source="agent",
             )
         )

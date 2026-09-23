@@ -48,6 +48,7 @@ import AgentRuns from "@/components/AgentRuns";
 import CodeChanges from "@/components/CodeChanges";
 import ProjectInventory from "@/components/ProjectInventory";
 import RoadmapGaps from "@/components/RoadmapGaps";
+import RepoRisk from "@/components/RepoRisk";
 import ProjectTeam from "@/components/ProjectTeam";
 import TimeLogPanel from "@/components/TimeLogPanel";
 
@@ -517,6 +518,7 @@ export default function ProjectDetailPage() {
           />
           <ProjectHistory project={p} />
           <RepoInsights project={p} />
+          <RepoRisk project={p} />
         </div>
       ) : null}
 

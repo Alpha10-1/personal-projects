@@ -166,12 +166,23 @@ def git(root: Path, *args: str, timeout: float = GIT_TIMEOUT) -> str:
 
     An argument list, never a shell string, so a branch called `; rm -rf /`
     is a branch name and nothing else.
+
+    Decoded as UTF-8 with replacement, explicitly. `text=True` alone uses
+    the locale encoding, which on Windows is cp1252 -- and a single byte a
+    source file happens to contain that cp1252 has no character for takes
+    down the whole call from inside a reader thread, where the traceback
+    points at `splitlines()` on a None and not at the decode that failed.
+    Replacement is right here: this output is searched and displayed, never
+    written back, so a mangled character costs a wrong-looking line rather
+    than a corrupted file.
     """
     try:
         proc = subprocess.run(
             ["git", "-C", str(root), *args],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
             check=False,
         )

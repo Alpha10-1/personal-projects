@@ -290,3 +290,74 @@ def as_prompt(snap: dict, note_chars: int = 2_000) -> str:
             parts.append(head)
 
     return "\n".join(parts)
+
+
+# Filenames say what the work is about at least as often as a note does:
+# a change to `powerbi.py` in a project with a task called "Power BI
+# delegated sign-in" is the same work, and nothing but the path says so.
+def words_in_path(path: str) -> set[str]:
+    """The significant words in a file path, treated like a title.
+
+    Extensions and directory names people repeat everywhere are dropped --
+    `src`, `app`, `components` describe where a file lives rather than what
+    it does, and matching on them would tie every change to every task.
+    """
+    parts = (path or "").replace("\\", "/").split("/")
+    if parts and "." in parts[-1]:
+        parts[-1] = parts[-1].rsplit(".", 1)[0]
+    words = significant(" ".join(parts).replace("_", " "))
+    return words - PLACE_WORDS
+
+
+PLACE_WORDS = {
+    "src", "app", "apps", "lib", "libs", "component", "components", "page",
+    "pages", "rout", "routes", "backend", "frontend", "server", "client",
+    "util", "utils", "test", "tests", "index", "main", "public", "static",
+    "style", "styles", "config", "core", "common", "shared", "modul",
+}
+
+# How much of a task's vocabulary has to appear in the change before it is
+# worth offering. Lower than TITLE_OVERLAP because the evidence is thinner:
+# a path and a short note against a whole title.
+LINK_OVERLAP = 0.34
+
+
+def likely_tasks(db: Session, project, path: str, note: str = "", limit: int = 3):
+    """Open tasks this change might belong to, best first.
+
+    A guess, offered and never applied. The cost of a wrong guess here is
+    that someone picks the right one from a list instead of a shorter list,
+    which is why it is tuned to suggest rather than to be certain -- and
+    why nothing is attached until a person chooses it.
+
+    Only open tasks. Attaching a change to something already finished is
+    almost always a sign the finished task was the wrong match.
+    """
+    haystack = words_in_path(path) | significant(note or "")
+    if not haystack:
+        return []
+
+    scored = []
+    for task in db.execute(
+        select(models.Task).where(
+            models.Task.project_id == project.id,
+            models.Task.status != "done",
+        )
+    ).scalars():
+        wanted = significant(task.title)
+        if not wanted:
+            continue
+        hits = wanted & haystack
+        score = len(hits) / len(wanted)
+        if score >= LINK_OVERLAP:
+            scored.append(
+                {
+                    "task_id": task.id,
+                    "title": task.title,
+                    "status": task.status,
+                    "score": round(score, 2),
+                    "matched": sorted(hits),
+                }
+            )
+    scored.sort(key=lambda row: (-row["score"], row["title"]))
+    return scored[:limit]

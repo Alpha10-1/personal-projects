@@ -666,6 +666,13 @@ class CodeChange(Base):
     # Why the change is being made, in the author's words.
     note = Column(Text, nullable=True)
 
+    # Which piece of work this change belongs to. Null is the ordinary case
+    # and not a gap to be filled in -- plenty of edits belong to no task.
+    # What it buys when it is set is a join the board has never had: "what
+    # actually changed for this task", answered from the files rather than
+    # from a commit message that happens to mention it.
+    task_id = Column(Integer, ForeignKey("tasks.id"), nullable=True, index=True)
+
     status = Column(String(20), nullable=False, default="pending", index=True)
     approved_by_id = Column(Integer, ForeignKey("people.id"), nullable=True, index=True)
     approved_at = Column(DateTime, nullable=True, index=True)
