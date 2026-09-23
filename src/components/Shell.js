@@ -51,6 +51,13 @@ function isActive(pathname, href) {
  */
 const themeListeners = new Set();
 
+// Where the choice lives when `localStorage` will not have it: private
+// browsing, or storage blocked by policy. Without this the toggle reads
+// back null however many times it is pressed, and does nothing at all --
+// which is worse than not remembering, and was a regression the test for
+// "still works when storage is unavailable" caught.
+let themeInMemory = null;
+
 const themeStore = {
   subscribe(listener) {
     themeListeners.add(listener);
@@ -66,9 +73,10 @@ const themeStore = {
       const stored = window.localStorage.getItem("pp-theme");
       return stored === "light" || stored === "dark" ? stored : null;
     } catch {
-      // Private browsing or blocked storage: no saved choice, which is a
-      // real answer rather than an error.
-      return null;
+      // Only here. A stored value that is not a theme means no choice has
+      // been made; storage *throwing* means the choice could not be kept,
+      // and only the second case is what the in-memory copy is for.
+      return themeInMemory;
     }
   },
   // The server has no idea, and saying so is what keeps hydration honest.
@@ -76,10 +84,12 @@ const themeStore = {
     return null;
   },
   write(next) {
+    themeInMemory = next;
     try {
       window.localStorage.setItem("pp-theme", next);
     } catch {
-      // The toggle still works for this session; it just won't be remembered.
+      // The toggle still works for this session -- that is what the line
+      // above is for -- it just will not be remembered past it.
     }
     themeListeners.forEach((fn) => fn());
   },
