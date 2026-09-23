@@ -82,6 +82,42 @@ def test_a_missing_program_is_reported_not_raised(make, repo, overlay):
     assert "not found" in result.reason
 
 
+def test_a_relative_program_resolves_against_the_test_directory(make, repo, overlay):
+    """The bug that made this silently useless the first time it ran for real.
+
+    A relative `argv[0]` is resolved against the calling process's working
+    directory, not the `cwd=` given to subprocess, so the most natural thing
+    to type -- a path to the project's own interpreter -- was always "not
+    found".
+    """
+    import shutil
+
+    tools = repo / "tools"
+    tools.mkdir()
+    local = tools / ("py.exe" if sys.platform == "win32" else "py")
+    shutil.copy(sys.executable, local)
+    run_git(repo, "add", "tools")
+    run_git(repo, "commit", "-m", "tools")
+
+    project = make.project(
+        "Demo",
+        local_path=str(repo),
+        test_command="tools/py.exe -c pass" if sys.platform == "win32" else "tools/py -c pass",
+    )
+    result = verify.run(project, overlay)
+    # It was found and executed, which is the whole claim. A copied
+    # interpreter has no pyvenv.cfg beside it and exits non-zero; what
+    # matters is that it ran at all rather than coming back "not found".
+    assert result.ran is True, result.reason
+    assert result.exit_code is not None
+
+
+def test_a_bare_program_name_is_left_for_the_path(make, repo, overlay):
+    """`npm test` must still find npm on PATH."""
+    project = make.project("Demo", local_path=str(repo), test_command="definitely-not-real")
+    assert "not found" in verify.run(project, overlay).reason
+
+
 def test_no_command_means_no_run(make, repo, overlay):
     project = make.project("Demo", local_path=str(repo))
     result = verify.run(project, overlay)

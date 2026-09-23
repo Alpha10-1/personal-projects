@@ -217,6 +217,18 @@ def run(project, overlay) -> Result:
         except workspace.WorkspaceError as exc:
             return Result(ran=False, command=command, reason=str(exc))
 
+    # A relative program path is resolved against *this* process's working
+    # directory, not the `cwd=` handed to subprocess -- so
+    # `.venv/Scripts/python.exe -m pytest` with a test_dir of `backend`
+    # comes back "not found" and the whole feature quietly never works.
+    # Found by running it for real; the tests all passed because they used
+    # an absolute interpreter path. A bare name like `npm` is left alone so
+    # PATH lookup still happens.
+    if any(sep in argv[0] for sep in ("/", "\\")):
+        candidate = (cwd / argv[0]).resolve()
+        if candidate.exists():
+            argv[0] = str(candidate)
+
     before = materialise(root, overlay)
     try:
         proc = subprocess.run(

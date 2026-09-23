@@ -206,10 +206,14 @@ function RunDetail({ runId, onChanged }) {
         </div>
       ) : null}
 
+      {/* Null covers two different things — never asked for, and asked for
+          but refused — and the reason is the useful half. Without it a
+          broken test command looks exactly like no test command. */}
       {data.tests_passed === null || data.tests_passed === undefined ? (
         <p className="text-[11px] text-[var(--text-muted)]">
-          The tests were not run, so nothing here has been verified. Set a test
-          command on the project and the agent can check its own work.
+          {data.test_output
+            ? data.test_output
+            : "The tests were not run, so nothing here has been verified. Set a test command on the project and the agent can check its own work."}
         </p>
       ) : null}
 
