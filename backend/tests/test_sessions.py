@@ -261,3 +261,23 @@ def test_the_proposal_text_round_trips(hours, day):
         hours,
         date.fromisoformat(day),
     )
+
+
+def test_every_rule_here_can_actually_be_accepted(db, repo):
+    """The gap that made all three pending suggestions un-acceptable.
+
+    `review.apply` handled `project.time_log` from the start; the route's
+    APPLIES table did not know the pair, so `can_apply` came back false and
+    the UI disabled the button. The same shape as a column that reaches the
+    model and the form but never the schema -- two places that must agree,
+    and nothing making them.
+    """
+    from app.routes.review import APPLIES
+
+    project, commit = repo
+    commit(recent())
+    for suggestion in review.propose(db):
+        assert (suggestion.target_type, suggestion.field) in APPLIES, (
+            f"{suggestion.rule} proposes {suggestion.target_type}."
+            f"{suggestion.field}, which the UI cannot accept"
+        )

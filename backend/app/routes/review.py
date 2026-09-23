@@ -229,6 +229,11 @@ APPLIES = {
         "Adds this to the project's board as a todo, with the reasoning as "
         "its notes. Nothing else changes, and no code is written."
     ),
+    ("project", "time_log"): (
+        "Logs these hours against the project on that date, as build time, "
+        "marked as inferred rather than measured. It is an estimate read "
+        "off commit times -- edit the hours afterwards if you know better."
+    ),
     ("task", "status"): (
         "Moves this task to the proposed status, exactly as changing it by "
         "hand would -- including stamping its completion time if it becomes "
