@@ -1,6 +1,6 @@
 # Where this stands, what is left, and what IT needs to grant
 
-*Written 21 September 2026. Sections 1–4 are for whoever is working on this
+*Written 21 September 2026, revised 23 September. Sections 1–4 are for whoever is working on this
 tracker. Section 5 is written to be detached and sent to an IT administrator
 on its own.*
 
@@ -10,22 +10,35 @@ on its own.*
 
 | | |
 |---|---|
-| Backend tests | 961 passing, 3 deselected (network-marked) |
-| Frontend tests | 193 passing across 16 files |
-| Tables | 20 |
+| Backend tests | 1,100 passing, 3 deselected (network-marked) |
+| Frontend tests | 422 passing across 34 files — every component covered |
+| Tables | 20, now under Alembic |
 | Projects | 5, all linked to a repo, all with a summary |
-| Commits ingested | 199, of which 197 have file-level detail |
-| Tasks / milestones / time logs | **0 / 0 / 0** |
-| Notes | 8 (2 written by the assistant) |
-| Suggestions | 5 raised, all 5 accepted |
-| People / dashboards / brainstorms | 0 / 0 / 0 |
+| Commits ingested | 212, of which 197 have file-level detail |
+| Tasks / milestones / time logs | 12 / 1 / **0** |
+| Notes | 9 (2 written by the assistant) |
+| Suggestions | 34 raised, 29 still pending a decision |
+| People / dashboards / brainstorms | 1 / 0 / 0 |
 | MCP tools | 34 |
-| Model spend to date | $1.12 across 40 calls — see the note on agent runs below |
+| Model spend to date | $2.39 across 101 calls — see the note on agent runs below |
 | Nightly analyst run | green, last ran 07:30 on 21 Sep, exit 0 |
 
 The tracker itself — board, review rules, findings, commit timeline, spend
 ledger — runs entirely locally and needs no network at all. The assistant is
 the only part that sends anything anywhere.
+
+### Added since, and worth knowing about
+
+| | |
+|---|---|
+| **Alembic** | Two revisions: a baseline generated from the models, and one that closes the drift `ensure_columns` could never reach — 8 indexes, 3 foreign keys and 4 NOT NULL constraints the live database was missing. An existing database stamps itself on startup. |
+| **Backups must go through SQLite** | The database runs in WAL mode. Copying `personal.db` on its own loses everything since the last checkpoint — a 4MB write-ahead log, in practice. Use `sqlite3`'s backup API or `VACUUM INTO`, not `cp`. |
+| **Committed-secret scan** | On the Repo tab, and in the review. Reads history rather than the checkout. |
+| **Churn and coverage map** | Which files change most, and which of those nothing tests. |
+| **Hours proposed from commit times** | Suggestions only. 29 are pending, including three days of inferred hours. |
+| **The agent can run one fixed test command** | Set per project. It refuses on a dirty tree and restores byte for byte. |
+| **A code change can name the task it was for** | Shown on the task, guessed from the file path when you save. |
+
 
 ### What is deliberately not done
 
@@ -77,14 +90,14 @@ Ordered by what I would actually do next.
 | **Deep-sync the 2 new commits** | minutes | 197 of 199 have file detail; the two newest arrived after the last pass. The Repo tab offers it. |
 | ~~**Repo hygiene rule**~~ **— built** | done | A 30-line scan over data already stored found a committed `serviceAccountKey.json` and a `functions/.env` in `course-finder-app`, plus `.firebase` cache in 38 of 53 commits. Deterministic, no model, no API calls. It belongs in `review.py` beside the other rules. |
 | **Rotate the Anthropic key** | minutes | It was printed to a terminal during this work. See §4. |
-| **Frontend tests for what is untested** | ~1 day | 21 components, 5 tested. Untested: `Assistant`, `ProjectHistory`, `ProjectTeam`, `BrainstormPanel`, `Dashboards`, `RepoInsights`, `TaskList`, `TimeLogPanel`, `LibraryPanels`, `ProjectForm`, `TaskForm`, `PersonForm`, `AiSuggestions`, `Shell`, `charts`, `ui`. |
+| ~~**Frontend tests for what is untested**~~ **— built** | done | 21 components, 5 tested. Untested: `Assistant`, `ProjectHistory`, `ProjectTeam`, `BrainstormPanel`, `Dashboards`, `RepoInsights`, `TaskList`, `TimeLogPanel`, `LibraryPanels`, `ProjectForm`, `TaskForm`, `PersonForm`, `AiSuggestions`, `Shell`, `charts`, `ui`. |
 
 ### Worth doing before the schema changes again
 
 | | Effort | Why |
 |---|---|---|
-| **Alembic** | ~half a day | 16 tables and `ensure_columns()` can only *add* columns. Every change so far has been an addition, which is partly luck. The first rename or type change will be hand-written SQL against live data. |
-| **Delete the duplicate SSE parser** | ~20 min | `ProjectHistory.js` has its own copy of the streaming parser; the tested one is in `lib/ai.js`. The version under test and the version shipping are different code. |
+| ~~**Alembic**~~ **— built** | done | 16 tables and `ensure_columns()` can only *add* columns. Every change so far has been an addition, which is partly luck. The first rename or type change will be hand-written SQL against live data. |
+| ~~**Delete the duplicate SSE parser**~~ **— done** | done | `ProjectHistory.js` has its own copy of the streaming parser; the tested one is in `lib/ai.js`. The version under test and the version shipping are different code. |
 
 ### New since the Code tab landed
 
@@ -93,7 +106,7 @@ Ordered by what I would actually do next.
 | **Point the remaining three projects at folders** | minutes each | Only `personal-projects` and `Organization_management_system` are checked out. `admin-dashboard`, `ride-native` and `course-finder-app` exist only on GitHub, so they have no Code tab. Clone them and set the folder in each brief. |
 | **Watch what the model costs** | ongoing | Spend went from $0.09 to $1.12 in one afternoon, almost all of it agent runs. A run is roughly $0.10--$0.15 with caching on, an Explain is $0.02 (cached against the file, so the second look is free), a repository survey is $0.07, and a roadmap is $0.03. That is fine occasionally and not fine as a habit; the Spend page breaks it down by feature. |
 | ~~**Consider a test-running tool**~~ **— built** | done | The agent's honest weakness is that it cannot verify anything. A single fixed, project-configured command (not arbitrary shell) would let it check its own work. It is a meaningfully larger security surface than reading and writing files, which is why it was left out. |
-| **Frontend tests for `CodeWorkspace`** | ~1h | The file tree and the polling are the last untested part of the Code tab. |
+| ~~**Frontend tests for `CodeWorkspace`**~~ **— built** | done | The file tree and the polling are the last untested part of the Code tab. |
 | **Set a leader on the other projects** | minutes | Only `personal-projects` has one. Without a leader, each change has to name its approver by hand. |
 | **Teach the outline more languages** | ~2h each | `impact.py` reads Python and JavaScript. Anything else gets line counts and an honest note that it cannot see definitions. |
 
@@ -107,10 +120,12 @@ Ordered by what I would actually do next.
   `/plan`, `/plan/apply`, `/history` or `/ask`. You can read a timeline in a
   conversation but not ask for options or apply one.
 - **Power BI delegated sign-in** — see §5, blocked on IT.
-- **Three ESLint suppressions** remain (2 in `Shell.js`, 1 in `hooks.js`).
-- **`seed.py`** is now unused — the demo data it produced has been deleted.
-  It still contains work-shaped sample text in a public repo. Deleting the
-  file is a one-liner and closes that.
+- **One ESLint suppression** remains, in `hooks.js`, and it is a decision
+  rather than a to-do: `useAsync(loader, deps)` takes its dependencies as
+  an argument, so the rule cannot see them. The two in `Shell.js` are
+  gone -- the theme uses `useSyncExternalStore` and the mobile menu is
+  derived from the path.
+- ~~**`seed.py`**~~ **— deleted.**
 
 ---
 
