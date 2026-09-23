@@ -24,8 +24,14 @@ export function useAsync(loader, deps = []) {
         if (id === runId.current) setState((s) => ({ ...s, error, loading: false }));
       }
     },
-    // The loader is rebuilt by the caller whenever its inputs change, and the
-    // caller declares those inputs here.
+    // The one suppression left in the codebase, and it is deliberate rather
+    // than outstanding. `useAsync(loader, deps)` takes the dependencies as
+    // an argument, so the rule cannot see them -- it is the same shape as
+    // `useCallback` itself. Satisfying it would mean every caller memoising
+    // its own loader, which is a worse API for no behavioural gain.
+    //
+    // The contract it leaves to the caller: whatever the loader closes over
+    // must appear in `deps`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     deps,
   );

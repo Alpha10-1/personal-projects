@@ -3,8 +3,8 @@
 import { useCallback, useRef, useState } from "react";
 import { BookOpen, Layers, Send, Sparkles } from "lucide-react";
 
-import { API_URL, ApiError, api } from "@/lib/api";
-import { useAiStatus } from "@/lib/ai";
+import { api } from "@/lib/api";
+import { streamProjectAsk, useAiStatus } from "@/lib/ai";
 import { useAsync } from "@/lib/hooks";
 import Markdown from "@/components/Markdown";
 import {
@@ -91,40 +91,16 @@ export default function ProjectHistory({ project }) {
     abortRef.current = controller;
 
     try {
-      const response = await fetch(`${API_URL}/ai/projects/${project.id}/ask`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: asked }),
+      // The shared parser, not a second copy. This component had its own,
+      // which had drifted: it called `JSON.parse` unguarded, so one
+      // malformed frame killed the stream, and the copy under test was not
+      // the copy that shipped.
+      await streamProjectAsk({
+        projectId: project.id,
+        question: asked,
+        onDelta: (chunk) => setAnswer((current) => current + chunk),
         signal: controller.signal,
-        cache: "no-store",
       });
-      if (!response.ok) {
-        const body = await response.json().catch(() => null);
-        throw new ApiError(body?.detail || response.statusText, response.status);
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const frames = buffer.split("\n\n");
-        buffer = frames.pop() ?? "";
-        for (const frame of frames) {
-          let event = null;
-          let payload = null;
-          for (const line of frame.split("\n")) {
-            if (line.startsWith("event: ")) event = line.slice(7);
-            else if (line.startsWith("data: ")) payload = line.slice(6);
-          }
-          if (!event || payload === null) continue;
-          const parsed = JSON.parse(payload);
-          if (event === "delta") setAnswer((current) => current + parsed);
-          if (event === "error") throw new ApiError(parsed, 502);
-        }
-      }
     } catch (err) {
       if (err?.name !== "AbortError") setError(err);
     } finally {

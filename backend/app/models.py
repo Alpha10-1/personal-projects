@@ -298,7 +298,12 @@ class Suggestion(Base):
 
     # Which rule produced this, so a noisy one can be found and turned off.
     rule = Column(String(40), nullable=False, index=True)
-    fingerprint = Column(String(300), nullable=False, unique=True)
+    # Uniqueness is declared once, in `__table_args__` below, where it has a
+    # name. `unique=True` here as well asked for a second, anonymous
+    # constraint enforcing the same rule -- harmless in practice, but it
+    # meant autogenerate never agreed the schema was settled, because the
+    # named one it wanted was not the unnamed one that existed.
+    fingerprint = Column(String(300), nullable=False)
 
     # task | project
     target_type = Column(String(20), nullable=False)

@@ -44,7 +44,6 @@ cd backend
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-python seed.py                 # optional: sample data so the charts aren't empty
 uvicorn app.main:app --reload --port 8000
 ```
 
@@ -1292,7 +1291,6 @@ backend/
     ai.py          the model client -- the only thing that leaves the machine
     assistant.py   what the model is told, and what it is asked for
     routes/        projects, milestones, tasks, time_logs, library, dashboard, ai
-  seed.py          sample data (refuses to run if projects already exist)
 src/
   app/             Next.js App Router pages
   components/      shell, forms, task list, panels, charts

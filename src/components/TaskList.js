@@ -7,10 +7,21 @@ import { api } from "@/lib/api";
 import { formatHours, relativeDue } from "@/lib/format";
 import { PRIORITY_TONE, TASK_STATUSES } from "@/lib/constants";
 import { Badge, EmptyState, Select } from "@/components/ui";
+import TaskChanges from "@/components/TaskChanges";
 
 /** One task row: a toggle, the title, and the handful of facts worth seeing
  *  without opening anything. */
-function TaskRow({ task, onChanged, onEdit, onDelete, showProject }) {
+function TaskRow({
+  task,
+  onChanged,
+  onEdit,
+  onDelete,
+  showProject,
+  // The task's code changes, handed down rather than fetched: one request
+  // per row for a list that is usually empty would be a poor trade.
+  changes,
+  onOpenChange,
+}) {
   const [busy, setBusy] = useState(false);
   const due = relativeDue(task.due_date);
   const done = task.status === "done";
@@ -90,6 +101,8 @@ function TaskRow({ task, onChanged, onEdit, onDelete, showProject }) {
           ) : null}
           {task.blocked_reason ? <span>· {task.blocked_reason}</span> : null}
         </div>
+
+        <TaskChanges changes={changes} onOpen={onOpenChange} />
       </div>
 
       <div className="flex shrink-0 items-center gap-1">
@@ -134,6 +147,9 @@ export default function TaskList({
   showProject = true,
   emptyTitle = "Nothing here",
   emptyDescription,
+  // A Map of task id -> its code changes, read once by the caller.
+  changesByTask,
+  onOpenChange,
 }) {
   if (!tasks?.length) {
     return <EmptyState title={emptyTitle} description={emptyDescription} />;
@@ -148,6 +164,8 @@ export default function TaskList({
           onEdit={onEdit}
           onDelete={onDelete}
           showProject={showProject}
+          changes={changesByTask?.get(task.id)}
+          onOpenChange={onOpenChange}
         />
       ))}
     </ul>

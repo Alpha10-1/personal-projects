@@ -202,6 +202,11 @@ export function streamChat({ messages, onDelta, signal }) {
   return streamSSE("/ai/chat", { messages }, { onDelta, signal });
 }
 
+/** A question about one project's history, answered from its commits. */
+export function streamProjectAsk({ projectId, question, onDelta, signal }) {
+  return streamSSE(`/ai/projects/${projectId}/ask`, { question }, { onDelta, signal });
+}
+
 /** A saved brainstorm. Only the new message is sent — the history is on the
  *  server, which is what makes the session resumable from another tab. */
 export function streamBrainstorm({ brainstormId, content, onDelta, signal }) {

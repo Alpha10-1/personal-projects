@@ -36,6 +36,7 @@ import {
   Spinner,
 } from "@/components/ui";
 import TaskList from "@/components/TaskList";
+import { byTask } from "@/components/TaskChanges";
 import TaskForm from "@/components/TaskForm";
 import ProjectForm from "@/components/ProjectForm";
 import LibraryPanels from "@/components/LibraryPanels";
@@ -150,6 +151,18 @@ export default function ProjectDetailPage() {
   const projectId = Number(id);
 
   const [tab, setTab] = useState("tasks");
+
+  // Read once and grouped, so a task list of forty rows is one request
+  // rather than forty. Only asked for when there is a checkout to have
+  // changes against.
+  const changeRows = useAsync(
+    () =>
+      p?.local_path
+        ? api.get(`/projects/${id}/code/changes`, { limit: 200 })
+        : Promise.resolve([]),
+    [id, p?.local_path],
+  );
+  const changesByTask = byTask(changeRows.data);
   const [editOpen, setEditOpen] = useState(false);
   const [taskForm, setTaskForm] = useState(null); // null | {task}
   const [milestoneForm, setMilestoneForm] = useState(null);
@@ -352,6 +365,7 @@ export default function ProjectDetailPage() {
             <TaskList
               tasks={openTasks}
               showProject={false}
+              changesByTask={changesByTask}
               onChanged={refreshAll}
               onEdit={(task) => setTaskForm({ task })}
               onDelete={(task) =>
@@ -372,6 +386,7 @@ export default function ProjectDetailPage() {
               <TaskList
                 tasks={doneTasks}
                 showProject={false}
+                changesByTask={changesByTask}
                 onChanged={refreshAll}
                 onEdit={(task) => setTaskForm({ task })}
               />

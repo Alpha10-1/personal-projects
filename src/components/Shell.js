@@ -4,7 +4,7 @@ import Link from "next/link";
 
 import Assistant from "@/components/Assistant";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import {
   BarChart3,
   BookMarked,
@@ -37,38 +37,72 @@ function isActive(pathname, href) {
   return href === "/" ? pathname === "/" : pathname.startsWith(href);
 }
 
-function ThemeToggle() {
-  const [theme, setTheme] = useState(null);
+/**
+ * The saved theme, as an external store.
+ *
+ * `localStorage` is exactly what `useSyncExternalStore` is for: a value that
+ * lives outside React, cannot be read on the server, and has to arrive after
+ * hydration without the markup disagreeing. Reading it in an effect and
+ * calling `setState` did the same job and needed the rule suppressed; this
+ * needs no suppression because React is doing the two-pass read itself.
+ *
+ * The `storage` event only fires in *other* tabs, so writes here notify the
+ * listeners directly -- which also keeps two open tabs in step.
+ */
+const themeListeners = new Set();
 
-  // The stored choice is applied after mount rather than during render: the
-  // server has no way to know it, and reading it during render would produce
-  // markup that doesn't match what gets hydrated.
-  useEffect(() => {
-    const stored = window.localStorage.getItem("pp-theme");
-    if (stored === "light" || stored === "dark") {
-      // set-state-in-effect is suppressed rather than fixed: localStorage is
-      // unreadable during SSR, so this genuinely cannot move into render or
-      // into a lazy initialiser without a hydration mismatch. It runs once on
-      // mount, so the cascading render the rule guards against is bounded.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setTheme(stored);
-      document.documentElement.setAttribute("data-theme", stored);
+const themeStore = {
+  subscribe(listener) {
+    themeListeners.add(listener);
+    const relay = () => themeListeners.forEach((fn) => fn());
+    window.addEventListener("storage", relay);
+    return () => {
+      themeListeners.delete(listener);
+      window.removeEventListener("storage", relay);
+    };
+  },
+  read() {
+    try {
+      const stored = window.localStorage.getItem("pp-theme");
+      return stored === "light" || stored === "dark" ? stored : null;
+    } catch {
+      // Private browsing or blocked storage: no saved choice, which is a
+      // real answer rather than an error.
+      return null;
     }
-  }, []);
+  },
+  // The server has no idea, and saying so is what keeps hydration honest.
+  readOnServer() {
+    return null;
+  },
+  write(next) {
+    try {
+      window.localStorage.setItem("pp-theme", next);
+    } catch {
+      // The toggle still works for this session; it just won't be remembered.
+    }
+    themeListeners.forEach((fn) => fn());
+  },
+};
+
+function ThemeToggle() {
+  const theme = useSyncExternalStore(
+    themeStore.subscribe,
+    themeStore.read,
+    themeStore.readOnServer,
+  );
+
+  // A DOM side effect, which is what effects are for -- unlike the setState
+  // that used to live here.
+  useEffect(() => {
+    if (theme) document.documentElement.setAttribute("data-theme", theme);
+  }, [theme]);
 
   const toggle = () => {
     const current =
       theme ??
       (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
-    const next = current === "dark" ? "light" : "dark";
-    setTheme(next);
-    document.documentElement.setAttribute("data-theme", next);
-    try {
-      window.localStorage.setItem("pp-theme", next);
-    } catch {
-      // Private browsing or blocked storage: the toggle still works for this
-      // session, it just won't be remembered.
-    }
+    themeStore.write(current === "dark" ? "light" : "dark");
   };
 
   return (
@@ -85,15 +119,14 @@ function ThemeToggle() {
 
 export default function Shell({ children }) {
   const pathname = usePathname();
-  const [menuOpen, setMenuOpen] = useState(false);
 
-  // Closing the mobile menu on navigation. Suppressed rather than moved into
-  // the link's onClick because this also covers back/forward navigation,
-  // which no click handler sees.
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setMenuOpen(false);
-  }, [pathname]);
+  // The menu remembers which page it was opened on, and is open only while
+  // you are still there. Derived rather than closed in an effect: navigating
+  // changes `pathname`, so it closes on its own, and that covers back and
+  // forward too, which no click handler sees.
+  const [openedAt, setOpenedAt] = useState(null);
+  const menuOpen = openedAt === pathname;
+  const setMenuOpen = (open) => setOpenedAt(open ? pathname : null);
 
   const nav = (
     <nav className="flex flex-col gap-0.5">
@@ -123,7 +156,7 @@ export default function Shell({ children }) {
       <header className="sticky top-0 z-40 flex items-center gap-3 border-b bg-[var(--surface-1)] px-4 py-2.5 lg:hidden">
         <button
           type="button"
-          onClick={() => setMenuOpen((open) => !open)}
+          onClick={() => setMenuOpen(!menuOpen)}
           aria-label={menuOpen ? "Close navigation" : "Open navigation"}
           aria-expanded={menuOpen}
           className="rounded-lg border p-1.5"

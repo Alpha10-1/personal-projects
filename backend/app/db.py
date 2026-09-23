@@ -89,8 +89,47 @@ def ensure_columns():
                 )
 
 
+def stamp_if_unmanaged():
+    """Tell Alembic that an existing database already has the baseline.
+
+    Every copy of this app that predates migrations has the tables and no
+    `alembic_version` row. Running `alembic upgrade` against one would try
+    to create what is already there and fail on the first table.
+
+    So: if the schema exists but is unstamped, record the baseline. The
+    alternative -- asking the user to run a one-off command they will only
+    ever need once, on a day when it is not obvious why -- is how a
+    migration story gets abandoned.
+
+    A genuinely empty database is left alone. `create_all` has already made
+    it match, and stamping the baseline there is equally correct.
+    """
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    if not tables or "alembic_version" in tables:
+        return
+    try:
+        from alembic import command
+        from alembic.config import Config
+    except ImportError:
+        # Alembic is optional at runtime: the app works without it, it just
+        # cannot migrate. Saying nothing here would be wrong, but so would
+        # refusing to start.
+        return
+
+    here = Path(__file__).resolve().parents[1]
+    config = Config(str(here / "alembic.ini"))
+    config.set_main_option("script_location", str(here / "alembic"))
+    command.stamp(config, "head")
+
+
 def init_db():
     from app import models  # noqa: F401  (registers the tables on Base)
 
     Base.metadata.create_all(engine)
+    # Still here, and still additive-only. It runs before the stamp so that
+    # a database from before migrations is brought level on columns first --
+    # after which Alembic owns everything `ensure_columns` never could:
+    # indexes, foreign keys, NOT NULL, renames, types.
     ensure_columns()
+    stamp_if_unmanaged()
