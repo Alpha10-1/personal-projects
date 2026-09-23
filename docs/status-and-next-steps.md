@@ -75,7 +75,7 @@ Ordered by what I would actually do next.
 | | Effort | Why |
 |---|---|---|
 | **Deep-sync the 2 new commits** | minutes | 197 of 199 have file detail; the two newest arrived after the last pass. The Repo tab offers it. |
-| **Repo hygiene rule** | ~2h | A 30-line scan over data already stored found a committed `serviceAccountKey.json` and a `functions/.env` in `course-finder-app`, plus `.firebase` cache in 38 of 53 commits. Deterministic, no model, no API calls. It belongs in `review.py` beside the other rules. |
+| ~~**Repo hygiene rule**~~ **— built** | done | A 30-line scan over data already stored found a committed `serviceAccountKey.json` and a `functions/.env` in `course-finder-app`, plus `.firebase` cache in 38 of 53 commits. Deterministic, no model, no API calls. It belongs in `review.py` beside the other rules. |
 | **Rotate the Anthropic key** | minutes | It was printed to a terminal during this work. See §4. |
 | **Frontend tests for what is untested** | ~1 day | 21 components, 5 tested. Untested: `Assistant`, `ProjectHistory`, `ProjectTeam`, `BrainstormPanel`, `Dashboards`, `RepoInsights`, `TaskList`, `TimeLogPanel`, `LibraryPanels`, `ProjectForm`, `TaskForm`, `PersonForm`, `AiSuggestions`, `Shell`, `charts`, `ui`. |
 
@@ -92,14 +92,14 @@ Ordered by what I would actually do next.
 |---|---|---|
 | **Point the remaining three projects at folders** | minutes each | Only `personal-projects` and `Organization_management_system` are checked out. `admin-dashboard`, `ride-native` and `course-finder-app` exist only on GitHub, so they have no Code tab. Clone them and set the folder in each brief. |
 | **Watch what the model costs** | ongoing | Spend went from $0.09 to $1.12 in one afternoon, almost all of it agent runs. A run is roughly $0.10--$0.15 with caching on, an Explain is $0.02 (cached against the file, so the second look is free), a repository survey is $0.07, and a roadmap is $0.03. That is fine occasionally and not fine as a habit; the Spend page breaks it down by feature. |
-| **Consider a test-running tool** | ~half a day, and a real decision | The agent's honest weakness is that it cannot verify anything. A single fixed, project-configured command (not arbitrary shell) would let it check its own work. It is a meaningfully larger security surface than reading and writing files, which is why it was left out. |
+| ~~**Consider a test-running tool**~~ **— built** | done | The agent's honest weakness is that it cannot verify anything. A single fixed, project-configured command (not arbitrary shell) would let it check its own work. It is a meaningfully larger security surface than reading and writing files, which is why it was left out. |
 | **Frontend tests for `CodeWorkspace`** | ~1h | The file tree and the polling are the last untested part of the Code tab. |
 | **Set a leader on the other projects** | minutes | Only `personal-projects` has one. Without a leader, each change has to name its approver by hand. |
 | **Teach the outline more languages** | ~2h each | `impact.py` reads Python and JavaScript. Anything else gets line counts and an honest note that it cannot see definitions. |
 
 ### Larger, and genuinely optional
 
-- **Infer time from commit timestamps** and *propose* time logs — "you
+- ~~**Infer time from commit timestamps**~~ **— built.** Proposes time logs — "you
   committed six times between 19:10 and 22:40, log 3.5h?". This is the only
   realistic way the estimate calibration ever gets data, short of logging by
   hand every day.

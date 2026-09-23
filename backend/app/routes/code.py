@@ -63,6 +63,13 @@ def person_name(db: Session, person_id: Optional[int]) -> Optional[str]:
     return person.name if person else None
 
 
+def task_title(db: Session, task_id: Optional[int]) -> Optional[str]:
+    if not task_id:
+        return None
+    task = db.get(models.Task, task_id)
+    return task.title if task else None
+
+
 def serialize(db: Session, change: models.CodeChange, *, full: bool = False) -> dict:
     out = {
         "id": change.id,
@@ -72,6 +79,8 @@ def serialize(db: Session, change: models.CodeChange, *, full: bool = False) -> 
         "origin": change.origin,
         "agent_run_id": change.agent_run_id,
         "note": change.note,
+        "task_id": change.task_id,
+        "task_title": task_title(db, change.task_id),
         "status": change.status,
         "approved_by_id": change.approved_by_id,
         "approved_by": person_name(db, change.approved_by_id),
@@ -114,6 +123,10 @@ class EditRequest(BaseModel):
     )
     note: Optional[str] = Field(default=None, max_length=2000)
     delete: bool = False
+    # Which piece of work this belongs to. Optional, and staying optional:
+    # most edits do not belong to a task, and a required field here would
+    # be answered with whatever was top of the list.
+    task_id: Optional[int] = None
 
 
 @router.post("/projects/{project_id}/code/changes", status_code=201)
@@ -159,6 +172,13 @@ def raise_change(project_id: int, body: EditRequest, db: Session = Depends(get_d
     if before is None and after is None:
         raise HTTPException(status_code=409, detail="There is nothing there to delete.")
 
+    if body.task_id is not None:
+        task = db.get(models.Task, body.task_id)
+        if task is None or task.project_id != project_id:
+            raise HTTPException(
+                status_code=400, detail="That task is not on this project."
+            )
+
     head = workspace.head(root)["last_commit"]
     change = models.CodeChange(
         project_id=project_id,
@@ -168,6 +188,7 @@ def raise_change(project_id: int, body: EditRequest, db: Session = Depends(get_d
         after_text=after,
         origin="human",
         note=body.note,
+        task_id=body.task_id,
         base_sha=head["sha"] if head else None,
     )
     db.add(change)
@@ -225,12 +246,15 @@ def submit_run_for_review(run_id: int, db: Session = Depends(get_db)):
 def list_changes(
     project_id: int,
     status: Optional[str] = None,
+    task_id: Optional[int] = None,
     limit: int = Query(RECENT_LIMIT, ge=1, le=200),
     db: Session = Depends(get_db),
 ):
     stmt = select(models.CodeChange).where(models.CodeChange.project_id == project_id)
     if status:
         stmt = stmt.where(models.CodeChange.status == status)
+    if task_id is not None:
+        stmt = stmt.where(models.CodeChange.task_id == task_id)
     rows = db.execute(
         stmt.order_by(models.CodeChange.created_at.desc()).limit(limit)
     ).scalars()
@@ -275,6 +299,74 @@ def read_impact(change_id: int, db: Session = Depends(get_db)):
     else:
         outline["still_as_approved"] = None
     return outline
+
+
+# --- what work a change belongs to ---------------------------------------
+
+
+@router.get("/projects/{project_id}/code/likely-task")
+def likely_task(
+    project_id: int,
+    path: str = Query(..., min_length=1),
+    note: str = "",
+    db: Session = Depends(get_db),
+):
+    """Open tasks this edit might belong to, best first.
+
+    A guess read off the file path and the note, using the same word
+    matching the roadmap uses to decide whether a proposal is already on
+    the board. Offered, never applied: the cost of being wrong is that
+    someone picks from a list, which is what they would have done anyway.
+    """
+    from app import board
+
+    project = project_or_404(db, project_id)
+    return {"path": path, "candidates": board.likely_tasks(db, project, path, note)}
+
+
+class LinkRequest(BaseModel):
+    # Null unlinks. There is no separate delete route because "this belongs
+    # to nothing" is a real answer rather than an absence of one.
+    task_id: Optional[int] = None
+
+
+@router.post("/code/changes/{change_id}/task")
+def link_change(change_id: int, body: LinkRequest, db: Session = Depends(get_db)):
+    """Attach this change to a task, or detach it.
+
+    Allowed after approval as well as before. Which piece of work an edit
+    belonged to is often only obvious afterwards, and refusing to record it
+    then would lose exactly the cases worth recording.
+    """
+    change = change_or_404(db, change_id)
+    if body.task_id is not None:
+        task = db.get(models.Task, body.task_id)
+        if task is None or task.project_id != change.project_id:
+            raise HTTPException(
+                status_code=400, detail="That task is not on this project."
+            )
+    change.task_id = body.task_id
+    db.commit()
+    db.refresh(change)
+    return serialize(db, change)
+
+
+@router.get("/tasks/{task_id}/code/changes")
+def changes_for_task(task_id: int, db: Session = Depends(get_db)):
+    """What actually changed on disk for this task.
+
+    The join the board has never had. A commit message that mentions a task
+    is a claim; this is the files, with both sides of each one stored.
+    """
+    task = db.get(models.Task, task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    rows = db.execute(
+        select(models.CodeChange)
+        .where(models.CodeChange.task_id == task_id)
+        .order_by(models.CodeChange.created_at.desc())
+    ).scalars()
+    return [serialize(db, row) for row in rows]
 
 
 # --- deciding ------------------------------------------------------------

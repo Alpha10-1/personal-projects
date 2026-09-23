@@ -73,6 +73,39 @@ export default function CodeEditor({ project, path, onRaised, onOpenInEditor }) 
   // the cursor, which would otherwise clear it.
   const [asked, setAsked] = useState(null);
 
+  // Which task this edit is for. Both lists are fetched on the file, not on
+  // the note, so typing a reason does not re-query on every keystroke.
+  const openTasks = useAsync(
+    () => api.get("/tasks", { project_id: project.id, open_only: true, limit: 200 }),
+    [project.id],
+  );
+  const guess = useAsync(
+    () => api.get(`/projects/${project.id}/code/likely-task`, { path }),
+    [project.id, path],
+  );
+
+  // `undefined` means untouched, so the guess still applies; `null` means
+  // deliberately none. Derived rather than written in an effect, which
+  // would fight the guess arriving.
+  const [chosen, setChosen] = useState(undefined);
+  const suggested = guess.data?.candidates?.[0] ?? null;
+  const taskId =
+    chosen === undefined ? (suggested ? String(suggested.task_id) : "") : chosen ?? "";
+  const setTaskId = setChosen;
+
+  // Guesses first, with what they matched on; then everything else open.
+  // Both are defended with `Array.isArray` rather than `??`: these are two
+  // independent requests, and a picker is not worth taking the editor down
+  // for if either answers with something unexpected.
+  const scored = Array.isArray(guess.data?.candidates) ? guess.data.candidates : [];
+  const everyTask = Array.isArray(openTasks.data) ? openTasks.data : [];
+  const options = [
+    ...scored,
+    ...everyTask
+      .filter((task) => !scored.some((hit) => hit.task_id === task.id))
+      .map((task) => ({ task_id: task.id, title: task.title, matched: [] })),
+  ];
+
   const askExplain = async (lines, refresh = false) => {
     if (!lines) return;
     setAsked(lines);
@@ -98,6 +131,7 @@ export default function CodeEditor({ project, path, onRaised, onOpenInEditor }) 
         path,
         content: value,
         note: note.trim() || null,
+        task_id: taskId ? Number(taskId) : null,
       });
       setRaised(change);
       setNote("");
@@ -224,6 +258,29 @@ export default function CodeEditor({ project, path, onRaised, onOpenInEditor }) 
               className="mt-1 w-full rounded border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1 text-xs"
             />
           </label>
+          <label className="block text-xs text-[var(--text-secondary)]">
+            Which work this is for
+            <select
+              value={taskId ?? ""}
+              onChange={(event) => setTaskId(event.target.value || null)}
+              className="mt-1 w-full rounded border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1 text-xs"
+            >
+              <option value="">Not part of a task</option>
+              {options.map((task) => (
+                <option key={task.task_id} value={task.task_id}>
+                  {task.title}
+                  {task.score ? `  — matches ${task.matched.join(", ")}` : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+          {suggested && taskId === String(suggested.task_id) ? (
+            <p className="text-[11px] text-[var(--text-muted)]">
+              Guessed from the file name. Change it if that is wrong — nothing
+              depends on it being right.
+            </p>
+          ) : null}
+
           <div className="flex flex-wrap items-center gap-2">
             <Button onClick={save} disabled={saving}>
               <Save size={13} /> Save for review

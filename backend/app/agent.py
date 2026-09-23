@@ -23,10 +23,13 @@ is not.
 **Every path goes through `workspace.safe_join`.** The model chooses these
 strings, which makes them exactly as untrusted as anything a user types.
 
-What this deliberately does not have is a shell. No `run tests`, no `npm
-install`, no arbitrary command. A model that can edit files and be reviewed
-is a useful assistant; a model that can execute anything is a different
-security question, and not one to answer by accident while adding a feature.
+**There is no shell.** The one thing the agent can execute is `run_tests`,
+and that tool takes no arguments: the command is a field on the project,
+typed by you, split with `shlex` and run directly. The model chooses only
+*when* to run it, never *what*. No `npm install`, no arbitrary command, and
+nothing the model produces reaches an argument list. `verify.py` is the
+whole of that mechanism and states plainly what it does and does not
+protect against -- it is worth reading before setting the field.
 """
 
 import fnmatch
@@ -36,7 +39,7 @@ from difflib import unified_diff
 from pathlib import Path
 from typing import Optional
 
-from app import ai, workspace
+from app import ai, verify, workspace
 
 # Turns, not minutes. A run that hasn't finished in this many exchanges is
 # lost rather than slow, and each turn re-sends everything before it, so the
@@ -149,6 +152,10 @@ class Overlay:
     root: Path
     pending: dict[str, Optional[str]] = field(default_factory=dict)
     read_bytes: int = 0
+    # The most recent test run, or None if the tests were never run.
+    # Held here rather than returned through the tool result because the
+    # proposal needs it after the loop has ended.
+    last_test: object = None
 
     def read(self, relative: str) -> str:
         if matches(relative, NEVER_READ):
@@ -319,6 +326,18 @@ TOOLS = [
         },
     },
     {
+        "name": "run_tests",
+        "description": (
+            "Run this project's test command against your edits and get the "
+            "output back. Takes no arguments: the command is set on the "
+            "project and you cannot choose or change it. Use it after making "
+            "a change, and again after fixing what it reports. If it is not "
+            "available it will tell you why — carry on and say in your "
+            "summary that the change is unverified."
+        ),
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
         "name": "finish",
         "description": (
             "End the run and report. Call this exactly once, when the change "
@@ -393,7 +412,7 @@ def match_endings(content: str, fragment: str) -> str:
     return fragment.replace("\r\n", "\n").replace("\n", "\r\n")
 
 
-def run_tool(overlay: Overlay, name: str, args: dict) -> str:
+def run_tool(overlay: Overlay, name: str, args: dict, project=None) -> str:
     """Carry out one tool call and return what the model should see.
 
     Errors come back as text rather than raising: "that string appears twice"
@@ -401,6 +420,17 @@ def run_tool(overlay: Overlay, name: str, args: dict) -> str:
     waste everything spent so far.
     """
     try:
+        if name == "run_tests":
+            # The one tool that runs something. It takes no arguments at
+            # all -- deliberately, so that nothing the model produces
+            # reaches the argument list. See `verify.py` for what that
+            # does and does not protect against.
+            if project is None:
+                return "Tests cannot be run in this context."
+            result = verify.run(project, overlay)
+            overlay.last_test = result
+            return result.as_text()
+
         if name == "list_files":
             entries = workspace.listing(overlay.root, args.get("path", ""))
             if not entries:
@@ -590,7 +620,7 @@ async def execute(project, instruction: str, *, max_turns: int = MAX_TURNS) -> d
                 {
                     "type": "tool_result",
                     "tool_use_id": call.id,
-                    "content": run_tool(overlay, call.name, args),
+                    "content": run_tool(overlay, call.name, args, project),
                 }
             )
         messages.append({"role": "user", "content": results})
@@ -612,6 +642,12 @@ async def execute(project, instruction: str, *, max_turns: int = MAX_TURNS) -> d
         "error": error,
         "turns": turns,
         "base_sha": base_sha,
+        "tests_passed": (
+            overlay.last_test.passed if overlay.last_test is not None else None
+        ),
+        "test_output": (
+            overlay.last_test.as_text() if overlay.last_test is not None else None
+        ),
         "review_required": bool(touched_protected),
         "review_reason": (
             "This run changes "

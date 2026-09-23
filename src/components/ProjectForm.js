@@ -1,7 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { FolderGit2, GitBranch, ShieldAlert, UserCheck } from "lucide-react";
+import {
+  FlaskConical,
+  FolderGit2,
+  GitBranch,
+  ShieldAlert,
+  UserCheck,
+} from "lucide-react";
 
 import { api } from "@/lib/api";
 import { useAsync } from "@/lib/hooks";
@@ -24,6 +30,8 @@ const EMPTY = {
   repo: "",
   local_path: "",
   protected_paths: "",
+  test_command: "",
+  test_dir: "",
   leader_id: "",
   progress_override: "",
   retro: "",
@@ -88,6 +96,8 @@ export default function ProjectForm({ open, onClose, onSaved, project = null }) 
         repo: text(form.repo),
         local_path: text(form.local_path),
         protected_paths: text(form.protected_paths),
+        test_command: text(form.test_command),
+        test_dir: text(form.test_dir),
         leader_id: form.leader_id === "" ? null : Number(form.leader_id),
         progress_override:
           form.progress_override === "" ? null : Number(form.progress_override),
@@ -271,6 +281,33 @@ export default function ProjectForm({ open, onClose, onSaved, project = null }) 
             value={form.protected_paths}
             onChange={set("protected_paths")}
             placeholder={"**/migrations/*\nsrc/pricing.py"}
+          />
+        </Field>
+
+        <Field
+          label={
+            <span className="inline-flex items-center gap-1.5">
+              <FlaskConical size={13} /> Test command
+              <Badge tone="neutral">optional</Badge>
+            </span>
+          }
+          hint="The one command the agent may run to check its own work. It chooses when, never what — nothing it writes reaches this line. Not a shell: one program and its arguments, so && and | are just text. Leave blank and the agent cannot verify anything."
+        >
+          <input
+            value={form.test_command}
+            onChange={set("test_command")}
+            placeholder="python -m pytest -q"
+          />
+        </Field>
+
+        <Field
+          label="Run the tests from"
+          hint="A folder inside the repository. Blank means the repository root."
+        >
+          <input
+            value={form.test_dir}
+            onChange={set("test_dir")}
+            placeholder="backend"
           />
         </Field>
 

@@ -50,6 +50,9 @@ def serialize(run: models.AgentRun, *, full: bool = False) -> dict:
         "instruction": run.instruction,
         "status": run.status,
         "review_required": run.review_required,
+        # Null means the tests were never run, which is a different
+        # thing from a run that went red and must read as one.
+        "tests_passed": run.tests_passed,
         "review_reason": run.review_reason,
         "auto_apply": run.auto_apply,
         "summary": run.summary,
@@ -65,6 +68,7 @@ def serialize(run: models.AgentRun, *, full: bool = False) -> dict:
     if full:
         out["changes"] = json.loads(run.changes_json or "[]")
         out["diff"] = run.diff
+        out["test_output"] = run.test_output
     return out
 
 
@@ -99,6 +103,8 @@ async def carry_out(run_id: int) -> None:
         run.summary = result["summary"]
         run.turns = result["turns"]
         run.base_sha = result["base_sha"]
+        run.tests_passed = result.get("tests_passed")
+        run.test_output = result.get("test_output")
         run.review_required = result["review_required"]
         run.review_reason = result["review_reason"]
         run.error = result["error"]

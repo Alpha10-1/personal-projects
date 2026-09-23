@@ -19,12 +19,14 @@ import { useCallback, useEffect, useState } from "react";
 import {
   AlertTriangle,
   Check,
+  CheckCircle2,
   ExternalLink,
   FileCode,
   Loader2,
   Play,
   ShieldAlert,
   Trash2,
+  XCircle,
 } from "lucide-react";
 
 import { api } from "@/lib/api";
@@ -168,6 +170,46 @@ function RunDetail({ runId, onChanged }) {
             <strong>Needs your approval.</strong> {data.review_reason} It will
             not be applied automatically, whatever the run asked for.
           </span>
+        </p>
+      ) : null}
+
+      {/* Two different claims, and the order says which to trust. The suite
+          is evidence; the summary below it is the model's account. */}
+      {data.tests_passed === true ? (
+        <p className="flex items-start gap-1.5 text-xs text-[var(--good)]">
+          <CheckCircle2 size={13} className="mt-px shrink-0" />
+          <span>
+            <strong>The tests pass</strong> with this change applied.
+          </span>
+        </p>
+      ) : null}
+
+      {data.tests_passed === false ? (
+        <div className="space-y-1">
+          <p className="flex items-start gap-1.5 text-xs text-[var(--critical)]">
+            <XCircle size={13} className="mt-px shrink-0" />
+            <span>
+              <strong>The tests fail</strong> with this change applied. Read
+              the output before approving anything.
+            </span>
+          </p>
+          {data.test_output ? (
+            <details>
+              <summary className="cursor-pointer text-[11px] text-[var(--text-muted)]">
+                What the run printed
+              </summary>
+              <pre className="mt-1 max-h-64 overflow-auto rounded bg-[var(--surface-2)] p-2 text-[10px] leading-relaxed">
+                {data.test_output}
+              </pre>
+            </details>
+          ) : null}
+        </div>
+      ) : null}
+
+      {data.tests_passed === null || data.tests_passed === undefined ? (
+        <p className="text-[11px] text-[var(--text-muted)]">
+          The tests were not run, so nothing here has been verified. Set a test
+          command on the project and the agent can check its own work.
         </p>
       ) : null}
 

@@ -65,6 +65,8 @@ class ProjectCreate(BaseModel):
     repo: Optional[str] = Field(default=None, max_length=255)
     local_path: Optional[str] = Field(default=None, max_length=1024)
     protected_paths: Optional[str] = None
+    test_command: Optional[str] = Field(default=None, max_length=500)
+    test_dir: Optional[str] = Field(default=None, max_length=500)
     leader_id: Optional[int] = None
     workspace: Workspace = "work"
     progress_override: Optional[int] = Field(default=None, ge=0, le=100)
@@ -88,6 +90,8 @@ class ProjectUpdate(BaseModel):
     repo: Optional[str] = Field(default=None, max_length=255)
     local_path: Optional[str] = Field(default=None, max_length=1024)
     protected_paths: Optional[str] = None
+    test_command: Optional[str] = Field(default=None, max_length=500)
+    test_dir: Optional[str] = Field(default=None, max_length=500)
     leader_id: Optional[int] = None
     workspace: Annotated[Optional[Workspace], NoNull] = None
     progress_override: Optional[int] = Field(default=None, ge=0, le=100)
@@ -111,6 +115,8 @@ class ProjectOut(ORMModel):
     repo: Optional[str]
     local_path: Optional[str]
     protected_paths: Optional[str]
+    test_command: Optional[str]
+    test_dir: Optional[str]
     leader_id: Optional[int]
     workspace: Workspace
     progress_override: Optional[int]

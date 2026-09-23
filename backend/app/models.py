@@ -85,6 +85,15 @@ class Project(Base):
     # "core" differs per project -- a migration folder here, a pricing
     # module there -- and only the person who owns the project knows which.
     protected_paths = Column(Text, nullable=True)
+
+    # The one command the agent may run to check its own work, and where to
+    # run it from. Typed by you, never by the model: `run_tests` takes no
+    # arguments, so the model chooses only when to run, never what. Split
+    # with shlex and executed directly, so it is one program and its
+    # arguments -- not a shell line, and `&&` in here is argument text.
+    test_command = Column(String(500), nullable=True)
+    test_dir = Column(String(500), nullable=True)
+
     # Who reviews and approves changes to this project's files.
     #
     # Not an access control -- this app has no login and one user, so
@@ -599,6 +608,14 @@ class AgentRun(Base):
 
     # The model's own account of what it did and what it did not do.
     summary = Column(Text, nullable=True)
+
+    # Whether the project's test command was run during this run, and what
+    # came of it. Null means never run -- distinct from False, which is a
+    # run that went red. Kept on the row because "the agent says it works"
+    # and "the suite says it works" are different claims and the second one
+    # should survive the conversation that produced it.
+    tests_passed = Column(Boolean, nullable=True)
+    test_output = Column(Text, nullable=True)
     # JSON: [{"path":..., "action": "modify|create|delete", "content":...}]
     # The whole new file, not a patch. Patches have to be applied to
     # something, and the something may have changed under us; full contents

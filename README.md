@@ -811,6 +811,167 @@ could ever match. Fixed; the same run then took 7 turns instead of 17.
 
 ---
 
+### Checking its own work
+
+The agent's honest weakness was that it could not tell whether what it
+wrote worked. Now it can, on **exactly one command** — set on the project,
+under *Test command* in the brief.
+
+The `run_tests` tool takes **no arguments at all**. The model decides only
+*when* to run it, never *what*: nothing it produces reaches the argument
+list. The command is split with `shlex` and executed directly rather than
+through a shell, so `&&`, `;` and `|` are argument text. A pipeline has to
+live in a script in the repository, where it is reviewable, instead of in
+a settings field.
+
+**It refuses to run on a dirty working copy.** The agent's edits live in an
+overlay and never touch disk; running tests means writing them out for the
+duration. Writing over your uncommitted work and restoring it afterwards is
+the kind of cleverness that loses an afternoon, so it does not: if `git
+status` is not clean, the run is refused and says so, and everything else
+about the run still works. The payoff is that if the process is killed
+mid-run, the recovery is the `git checkout` you would have reached for
+anyway, with nothing of yours caught up in it.
+
+What it puts back, it puts back **byte for byte**, from the original
+contents held in memory. `git checkout --` was the obvious restore and is
+wrong: it writes through git's line-ending configuration, so a file that
+went in as LF comes back as CRLF, and a repository gets quietly converted
+one test run at a time. Found by a test, not in production.
+
+What it cannot undo is what the *command* creates — a `__pycache__`, a
+coverage file, a build directory. Those are the ordinary residue of running
+the suite by hand.
+
+**It is not a sandbox, and says so.** The process runs as you, with your
+environment, under a timeout, with its output captured and truncated to the
+last 8,000 characters. A suite that deletes files or posts to an API will
+do those things. The protection is that you wrote the command.
+
+The result is stored on the run and shown above the model's summary,
+because they are different claims: the suite is evidence, the summary is an
+account. A run where the tests never ran says so rather than looking clean.
+
+---
+
+## Where a mistake would survive
+
+Two deterministic reads on the **Repo** tab. No model, nothing spent, and
+both answer from data already stored.
+
+### What changes, and what would catch a mistake
+
+Churn is counted from the commit file lists the deep sync already fetched.
+Coverage is asked the way the Explain panel asks it: find the definitions
+in the file, search the repository for each, see whether any of the hits
+are tests.
+
+Run against this repository the first time, it put `backend/app/schemas.py`
+at the top of the at-risk list — seven commits, 544 lines changed, nothing
+testing it. Which is exactly the file where `protected_paths` had been
+silently dropped a session earlier, because the column was added to the
+model and the form but never to the Pydantic schema. The map would have
+caught it.
+
+**Untested and unknown are never mixed.** A file whose coverage could not be
+determined — no checkout, a language the outline does not read, names too
+common to search for — is reported as unknown and is never counted as
+at-risk. Reporting "I could not tell" as "nothing tests this" is the more
+damaging of the two possible mistakes.
+
+Generated and vendored files are left out entirely. A lockfile outranking
+every file you actually maintain is not a useful list.
+
+### What has been committed that should not have been
+
+Read from **history**, not from the current checkout, because deleting a key
+today leaves it in every clone, every fork and every fetch that ever ran. A
+tool that only looked at what is on disk would call that fixed.
+
+It reports and stops there. Rewriting history has to be coordinated with
+anyone holding a clone, and a tracker is the wrong thing to be doing it for
+you. What it does is make sure you know, name the commit that introduced
+it, and insist on the part people get wrong: **anything that was pushed
+should be treated as exposed and rotated.**
+
+Run against the five linked repositories it found a committed
+`serviceAccountKey.json` and a `functions/.env` in `course-finder-app`, an
+`.env.local.txt` still on disk in `Organization_management_system`, and a
+`.firebase` cache in 38 commits.
+
+**`.env.example` is not a leak.** It matches the credential list by name and
+is the opposite of a leak — it is the file that exists so nobody has to
+guess. The first version flagged every one of them, which would have fired
+on almost every repository including this one, and a check that always
+fires is a check nobody reads. Templates are exempted, shown anyway so the
+filter can be judged, and checked for one thing: a real value left in one,
+which is a common way to publish a key. `ENVIRONMENT=development` is not
+that. A live Stripe key is.
+
+---
+
+## Hours you did not write down
+
+The tracker's whole downstream — hours by week, cycle time, whether your
+estimates run long — needs logged time, and nobody logs time by hand every
+day. What does exist is every commit's timestamp, already ingested.
+
+A run of commits close together is a sign work was continuous. That is
+enough to **propose** a figure, which is all this does: each day becomes a
+suggestion with its evidence attached, and nothing is written until you
+accept it. Days you have already logged by hand are skipped entirely — a
+figure you entered is the better number, and adding to it would quietly
+double-count the week.
+
+The arithmetic, in full, because every step is a guess with a number on it:
+
+| | |
+|---|---|
+| Commits grouped | per project, per calendar day |
+| A gap longer than 90 minutes | starts a new sitting |
+| Each sitting | first commit to last, **plus 30 minutes** for the work that produced the first |
+| Rounded | to the quarter hour, floor 0.5h |
+| Capped | at 12h across the day, scaled rather than truncated |
+
+Run over this repository's history it inferred 84 hours across 73 days — 6h
+for 21 September, from twelve commits between 06:59 and 13:39.
+
+**It is an estimate and is labelled as one everywhere it appears.** It
+cannot see the two hours of reading before the first commit, or the
+afternoon that produced nothing worth committing, and it counts a one-line
+typo fix the same as an hour that happened to land in one commit. Accepted
+hours are marked `agent`, so nothing downstream ever mistakes an inferred
+hour for one you measured.
+
+---
+
+## What a change was for
+
+`CodeChange` now carries a `task_id`. Null is the ordinary case and not a
+gap to be filled in — plenty of edits belong to no task. What it buys when
+it is set is a join the board never had: *what actually changed for this
+task*, answered from the files rather than from a commit message that
+happens to mention it.
+
+When you save an edit, the task picker is pre-filled with a guess, read off
+the file path and your note using the same word matching the roadmap uses.
+`powerbi.py` matches "Power BI delegated sign-in" — which needed the one
+non-obvious piece: filenames drop the space that titles keep, so adjacent
+word pairs are run together (`power` + `bi` becomes `powerbi`) and looked
+for whole. Adjacent pairs only; every combination would match `powersign`,
+which is not a filename anybody wrote.
+
+Directory names are ignored. `src`, `app`, `components` say where a file
+lives rather than what it does, and matching on them would tie every change
+to every task. Finished tasks are never offered: attaching an edit to
+something already done is nearly always the wrong match.
+
+The link can be set after approval too. Which piece of work an edit was for
+is often only obvious afterwards, and refusing to record it then would lose
+exactly the cases worth recording.
+
+---
+
 ## Power BI
 
 Two halves, and the first needs nothing set up.

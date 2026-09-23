@@ -322,6 +322,26 @@ PLACE_WORDS = {
 LINK_OVERLAP = 0.34
 
 
+def squashed(title: str) -> dict[str, tuple[str, str]]:
+    """Adjacent word pairs run together, as filenames write them.
+
+    `powerbi.py` is the Power BI work and nothing in plain word matching
+    says so: the title has `power` and `bi`, the filename has `powerbi`,
+    and the two never meet. Filenames drop the space that titles keep --
+    `timelog`, `codechange`, `signin` -- so the pairs are rebuilt here and
+    looked for whole.
+
+    Adjacent pairs only. Every combination would match `powersign` to
+    "Power BI delegated sign-in", which is not a filename anybody wrote.
+    """
+    words = [
+        stem(word.strip(".,:;()[]`\"'!?"))
+        for word in (title or "").replace("-", " ").replace("/", " ").lower().split()
+        if word.strip(".,:;()[]`\"'!?") not in STOPWORDS
+    ]
+    return {a + b: (a, b) for a, b in zip(words, words[1:]) if a and b}
+
+
 def likely_tasks(db: Session, project, path: str, note: str = "", limit: int = 3):
     """Open tasks this change might belong to, best first.
 
@@ -348,6 +368,11 @@ def likely_tasks(db: Session, project, path: str, note: str = "", limit: int = 3
         if not wanted:
             continue
         hits = wanted & haystack
+        # A filename that ran two of the title's words together counts for
+        # both of them, which is what makes `powerbi.py` match "Power BI".
+        for joined, (first, second) in squashed(task.title).items():
+            if joined in haystack:
+                hits = hits | {first, second}
         score = len(hits) / len(wanted)
         if score >= LINK_OVERLAP:
             scored.append(
